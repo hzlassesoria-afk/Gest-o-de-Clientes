@@ -3,12 +3,11 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const monday = require('./lib/monday');
+const { createStore } = require('./lib/store');
 
 const PORT = Number(process.env.PORT) || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const SEED_FILE = path.join(__dirname, 'seed', 'clients.json');
-const DB_FILE = path.join(DATA_DIR, 'clients.json');
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
@@ -16,19 +15,9 @@ const MIME = {
 };
 
 // ---------- persistência ----------
-function loadDb() {
-  if (!fs.existsSync(DB_FILE)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.copyFileSync(SEED_FILE, DB_FILE);
-  }
-  return JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-}
-
-function saveDb(db) {
-  const tmp = DB_FILE + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
-  fs.renameSync(tmp, DB_FILE);
-}
+const store = createStore(DATA_DIR);
+const loadDb = () => store.load();
+const saveDb = (db) => store.save(db);
 
 const slugify = (s) => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '')
   .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -101,8 +90,12 @@ function cleanProject(input) {
 
 // ---------- rotas ----------
 async function handleApi(req, res, url) {
-  const parts = url.pathname.split('/').filter(Boolean).slice(1); // remove "api"
-  const db = loadDb();
+  // Na Vercel, o rewrite entrega a rota original em ?p=<caminho>
+  const route = url.searchParams.get('p');
+  const parts = route != null
+    ? route.split('/').filter(Boolean)
+    : url.pathname.split('/').filter(Boolean).slice(1); // remove "api"
+  const db = await loadDb();
 
   if (parts[0] !== 'clients') return send(res, 404, { error: 'Rota não encontrada' });
 
@@ -125,7 +118,7 @@ async function handleApi(req, res, url) {
         monday: { boardName: 'Entrada de Clientes', itemName: name },
       };
       db.clients.push(client);
-      saveDb(db);
+      await saveDb(db);
       return send(res, 201, client);
     }
     return send(res, 405, { error: 'Método não permitido' });
@@ -143,7 +136,7 @@ async function handleApi(req, res, url) {
   // /api/clients/:id/project
   if (parts[2] === 'project' && req.method === 'PUT') {
     client.project = { ...client.project, ...cleanProject(await readBody(req)) };
-    saveDb(db);
+    await saveDb(db);
     return send(res, 200, client);
   }
 
@@ -152,12 +145,12 @@ async function handleApi(req, res, url) {
     if (!MONTH_RE.test(parts[3])) return send(res, 400, { error: 'Mês inválido (use AAAA-MM)' });
     if (req.method === 'PUT') {
       client.months[parts[3]] = { ...client.months[parts[3]], ...cleanMonth(await readBody(req)) };
-      saveDb(db);
+      await saveDb(db);
       return send(res, 200, client);
     }
     if (req.method === 'DELETE') {
       delete client.months[parts[3]];
-      saveDb(db);
+      await saveDb(db);
       return send(res, 200, client);
     }
   }
@@ -172,11 +165,11 @@ async function handleApi(req, res, url) {
         // Não sobrescreve o que já foi preenchido manualmente
         if (client.project[key] == null) { client.project[key] = value; applied.push({ key, value, from }); }
       }
-      saveDb(db);
+      await saveDb(db);
       return send(res, 200, { client, applied, suggested });
     } catch (err) {
       client.monday = { ...client.monday, error: err.message, syncedAt: new Date().toISOString() };
-      saveDb(db);
+      await saveDb(db);
       return send(res, 502, { error: err.message });
     }
   }
@@ -202,18 +195,20 @@ function serveStatic(req, res, url) {
   });
 }
 
-const server = http.createServer(async (req, res) => {
+async function handler(req, res) {
   const url = new URL(req.url, 'http://localhost');
   try {
-    if (url.pathname.startsWith('/api/')) await handleApi(req, res, url);
+    if (url.pathname.startsWith('/api')) await handleApi(req, res, url);
     else serveStatic(req, res, url);
   } catch (err) {
     send(res, err.status || 500, { error: err.message || 'Erro interno' });
   }
-});
+}
+
+const server = http.createServer(handler);
 
 if (require.main === module) {
   server.listen(PORT, () => console.log(`Gestão de Clientes rodando em http://localhost:${PORT}`));
 }
 
-module.exports = { server, cleanMonth, cleanProject };
+module.exports = { server, handler, cleanMonth, cleanProject };

@@ -63,3 +63,9 @@ test('não vaza arquivos fora de /public', async () => {
   const res = await fetch(base + '/..%2fserver.js');
   assert.notEqual(res.headers.get('content-type'), 'text/javascript; charset=utf-8');
 });
+
+test('rota vinda do rewrite da Vercel (?p=) funciona igual', async () => {
+  const r = await call('/api/index?p=clients/petra-seguros');
+  assert.equal(r.status, 200);
+  assert.equal(r.body.id, 'petra-seguros');
+});
