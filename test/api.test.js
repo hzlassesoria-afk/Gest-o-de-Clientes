@@ -69,3 +69,24 @@ test('rota vinda do rewrite da Vercel (?p=) funciona igual', async () => {
   assert.equal(r.status, 200);
   assert.equal(r.body.id, 'petra-seguros');
 });
+
+test('dados simulados: carrega, não sobrescreve dado real, e limpa só o simulado', async () => {
+  await call('/api/clients/petra-seguros/months/2026-08', 'PUT', { leads: 999 }); // mês "real"
+  let r = await call('/api/clients/petra-seguros/demo', 'POST');
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body.addedMonths, ['2026-06', '2026-07', '2026-09']); // 08 já existia
+  assert.equal(r.body.client.months['2026-08'].leads, 999);
+  assert.equal(r.body.client.months['2026-09']._demo, true);
+  assert.equal(r.body.client.project.roasTarget, 6);
+  assert.equal(r.body.client.project.contractDate, '2026-02-10'); // não sobrescreveu o que o usuário já tinha
+
+  // editar um mês simulado o torna real
+  r = await call('/api/clients/petra-seguros/months/2026-07', 'PUT', { leads: 170 });
+  assert.equal(r.body.months['2026-07']._demo, undefined);
+
+  r = await call('/api/clients/petra-seguros/demo', 'DELETE');
+  assert.deepEqual(r.body.removedMonths.sort(), ['2026-06', '2026-09']);
+  assert.ok(r.body.client.months['2026-07'] && r.body.client.months['2026-08']);
+  assert.equal(r.body.client.project.contractDate, '2026-02-10');
+  assert.equal(r.body.client.project.roasTarget, null); // era do demo e continuava igual
+});

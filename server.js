@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const monday = require('./lib/monday');
 const { createStore } = require('./lib/store');
+const { applyDemo, clearDemo } = require('./lib/demo');
 
 const PORT = Number(process.env.PORT) || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
@@ -144,7 +145,9 @@ async function handleApi(req, res, url) {
   if (parts[2] === 'months' && parts[3]) {
     if (!MONTH_RE.test(parts[3])) return send(res, 400, { error: 'Mês inválido (use AAAA-MM)' });
     if (req.method === 'PUT') {
-      client.months[parts[3]] = { ...client.months[parts[3]], ...cleanMonth(await readBody(req)) };
+      const merged = { ...client.months[parts[3]], ...cleanMonth(await readBody(req)) };
+      delete merged._demo; // editado pelo usuário: passa a valer como dado real
+      client.months[parts[3]] = merged;
       await saveDb(db);
       return send(res, 200, client);
     }
@@ -156,6 +159,21 @@ async function handleApi(req, res, url) {
   }
 
   // /api/clients/:id/monday/sync  (?apply=1 aplica as sugestões ao projeto)
+  // /api/clients/:id/demo  (POST carrega dados simulados, DELETE limpa só os simulados)
+  if (parts[2] === 'demo' && parts.length === 3) {
+    if (req.method === 'POST') {
+      const result = applyDemo(client);
+      await saveDb(db);
+      return send(res, 200, { client, ...result });
+    }
+    if (req.method === 'DELETE') {
+      const result = clearDemo(client);
+      await saveDb(db);
+      return send(res, 200, { client, ...result });
+    }
+    return send(res, 405, { error: 'Método não permitido' });
+  }
+
   if (parts[2] === 'monday' && parts[3] === 'sync' && req.method === 'POST') {
     try {
       const { board, snapshot, suggested } = await monday.syncClient(client, { token: process.env.MONDAY_API_TOKEN });

@@ -116,7 +116,7 @@ function renderMetrics() {
       <button class="btn btn-ghost" id="edit-project">Dados do projeto</button>
       <button class="btn" id="edit-month">Registrar dados do mês</button>
     </div>
-    ${hasData ? '' : `<div class="notice warn">Ainda não há dados neste período. Use “Registrar dados do mês” para lançar os números.${esc(mondayHint)}</div>`}
+    ${demoBanner(c, hasData, mondayHint)}
 
     <h2 class="section">Métricas de resultado do cliente</h2>
     <div class="grid">
@@ -168,6 +168,34 @@ function renderMetrics() {
   $('#period').onchange = (e) => { state.period = e.target.value; renderMetrics(); };
   $('#edit-month').onclick = () => openMonthDialog(state.period === 'all' ? currentMonth() : state.period);
   $('#edit-project').onclick = openProjectDialog;
+  const loadBtn = $('#load-demo'), clearBtn = $('#clear-demo');
+  if (loadBtn) loadBtn.onclick = () => demoAction('POST', loadBtn);
+  if (clearBtn) clearBtn.onclick = () => {
+    if (confirm('Remover os meses simulados? Meses que você editou ou lançou continuam.')) demoAction('DELETE', clearBtn);
+  };
+}
+
+function demoBanner(c, hasData, mondayHint) {
+  const demo = Object.keys(c.months).filter((k) => c.months[k]._demo).sort();
+  if (demo.length) {
+    return `<div class="notice warn"><b>Dados simulados</b> (exemplo, não são do cliente): ${demo.map(monthLabel).map(esc).join(', ')}.
+      Para lançar os números reais, abra “Registrar dados do mês” no mês desejado e salve: ele deixa de ser simulado.
+      <button class="btn btn-danger" id="clear-demo" style="margin-left:8px;padding:4px 10px">Limpar dados simulados</button></div>`;
+  }
+  if (!Object.keys(c.months).length) {
+    return `<div class="notice warn">Ainda não há dados. Lance os números em “Registrar dados do mês” ou veja como o painel fica com dados de exemplo.${esc(mondayHint)}
+      <button class="btn" id="load-demo" style="margin-left:8px;padding:4px 10px">Carregar dados de exemplo</button></div>`;
+  }
+  return hasData ? '' : `<div class="notice warn">Ainda não há dados neste período. Use “Registrar dados do mês” para lançar os números.${esc(mondayHint)}</div>`;
+}
+
+async function demoAction(method, btn) {
+  btn.disabled = true;
+  try {
+    await api(`/clients/${encodeURIComponent(state.client.id)}/demo`, { method });
+    state.period = null;
+    await render();
+  } catch (err) { btn.disabled = false; alert(err.message); }
 }
 
 function healthNote(m) {
@@ -198,7 +226,7 @@ function trendHtml(c) {
   const table = `<div class="panel scroll"><table class="data"><thead><tr>
     <th>Mês</th><th>Investimento</th><th>Leads</th><th>CPL</th><th>Qualificados</th><th>Vendas</th><th>Receita</th><th>ROAS</th><th>CAC</th><th>NPS</th><th>Health</th>
     </tr></thead><tbody>${rows.map((r) => `<tr>
-    <td>${esc(monthLabel(r.month))}</td><td>${cell(r.investimento, 'brl')}</td><td>${cell(r.leads, 'int')}</td><td>${cell(r.cpl, 'brl')}</td>
+    <td>${esc(monthLabel(r.month))}${c.months[r.month] && c.months[r.month]._demo ? ' <span class="pill warn">simulado</span>' : ''}</td><td>${cell(r.investimento, 'brl')}</td><td>${cell(r.leads, 'int')}</td><td>${cell(r.cpl, 'brl')}</td>
     <td>${cell(r.leadsQualificados, 'int')}</td><td>${cell(r.vendas, 'int')}</td><td>${cell(r.receita, 'brl')}</td>
     <td>${cell(r.roas, 'x')}</td><td>${cell(r.cac, 'brl')}</td><td>${cell(r.nps, 'nps')}</td><td>${cell(r.healthScore, 'int')}</td>
     </tr>`).join('')}</tbody></table></div>`;
@@ -253,6 +281,12 @@ function renderMonday() {
       <dt>Primeira venda</dt><dd>${esc(fmtDate(p.firstSaleDate) || '—')}</dd>
       <dt>MRR</dt><dd>${p.mrr != null ? esc(fmt.brl(p.mrr)) : '—'}</dd>
     </dl></div>
+    <h2 class="section">De onde vem cada dado</h2>
+    <div class="panel"><dl class="kv">
+      <dt>Do Monday (quando sincronizado)</dt><dd>MRR e as datas do projeto (início, contrato, campanhas, primeira venda) — só preenchem campos vazios.</dd>
+      <dt>Manual, todo mês</dt><dd>Investimento no Meta, leads, qualificados, respostas, cotações, pararam de responder, negociações, vendas e receita; faturado, inadimplente e dinheiro coletado; NPS, Health Score (opcional), reclamações, reuniões e contatos espontâneos.</dd>
+      <dt>Calculado sozinho</dt><dd>CPL, CPL qualificado, ticket médio, ROAS, CAC, taxa de inadimplência, índice de reclamação, Time to Value, tempo de projeto, nível de ansiedade e Health Score.</dd>
+    </dl><div class="hint">Tudo que vem do Monday também pode ser digitado à mão em “Dados do projeto”.</div></div>
     <h2 class="section">Dados do cliente no Monday</h2>
     <div class="panel">${snap
       ? `<dl class="kv">${snap.fields.map((f) => `<dt>${esc(f.title)}</dt><dd>${esc(f.text)}</dd>`).join('')}</dl>`
