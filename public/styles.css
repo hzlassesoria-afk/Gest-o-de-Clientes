@@ -94,7 +94,7 @@ dl.kv dt { color: var(--muted); }
   .sidebar { border-right: 0; border-bottom: 1px solid var(--border); }
   #client-list { flex-direction: row; flex-wrap: wrap; }
   .main { padding: 18px 16px 50px; }
-      .form-grid { grid-template-columns: 1fr; }
+  .form-grid { grid-template-columns: 1fr; }
   .card.wide { grid-column: auto; }
   dl.kv { grid-template-columns: 1fr; }
   dl.kv dt { border-bottom: 0; padding-bottom: 0; }

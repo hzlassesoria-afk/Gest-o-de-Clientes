@@ -170,7 +170,7 @@
     result.aderenciaReunioesPct = result.aderenciaReunioes == null ? null : result.aderenciaReunioes * 100;
     result.nivelAnsiedade = anxietyLevel(result.contatosEspontaneosSemana);
 
-    // Funil: cada etapa como % da etapa anterior preenchida
+    // Funil: conversão de cada etapa em relação à anterior
     result.funil = buildFunnel(result);
 
     const manualHealth = last(keys, months, 'healthScore');
