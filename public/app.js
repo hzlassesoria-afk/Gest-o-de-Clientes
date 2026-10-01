@@ -116,6 +116,7 @@ function renderMetrics() {
     ${demoBanner(c, hasData, mondayHint)}
 
     <h2 class="section">Métricas de resultado do cliente</h2>
+    <div class="resultado">
     <div class="grid">
       ${card('Investimento no Meta', m.investimento, 'brl', dlt('investimento'))}
       ${card('Leads', m.leads, 'int', dlt('leads'))}
@@ -131,9 +132,11 @@ function renderMetrics() {
       ${card('ROAS', m.roas, 'x', 'Receita ÷ investimento no Meta' + dlt('roas'))}
       ${card('CAC', m.cac, 'brl', (c.project.cacIncludesFee === false ? 'Investimento ÷ vendas' : '(Investimento + mensalidade) ÷ vendas') + dlt('cac'))}
     </div>
-
-    <h2 class="section">Funil comercial</h2>
-    <div class="panel">${funnelHtml(m)}</div>
+    <aside class="panel fn-panel" aria-label="Funil comercial">
+      <h3 class="fn-title">Funil comercial</h3>
+      ${funnelHtml(m)}
+    </aside>
+    </div>
 
     <h2 class="section">Métricas de gestão</h2>
     <div class="grid">
@@ -304,18 +307,11 @@ function healthNote(m) {
 }
 
 function funnelHtml(m) {
-  const max = Math.max(...m.funil.map((s) => s.value || 0), 0);
-  if (!max) return '<div class="empty-state">Sem dados de funil neste período.</div>';
-  const rows = m.funil.map((s) => `
-    <div class="funnel-row">
-      <div>${esc(s.label)}</div>
-      <div class="funnel-bar" role="img" aria-label="${esc(s.label)}: ${s.value ?? 0}"><div style="width:${max ? ((s.value || 0) / max) * 100 : 0}%"></div></div>
-      <div class="nums"><b>${s.value == null ? '—' : esc(fmt.int(s.value))}</b>
-        ${s.pctOfLeads != null && s.label !== 'Leads' ? ` · ${esc(fmt.pct(s.pctOfLeads * 100))} dos leads` : ''}</div>
-    </div>`).join('');
+  const svg = Funnel.build({ m, fmtInt: fmt.int, fmtPct: fmt.pct });
+  if (!svg) return '<div class="empty-state">Sem dados de funil neste período.</div>';
   const lost = m.pararamResponder != null
     ? `<div class="lost">${esc(fmt.int(m.pararamResponder))} lead(s) pararam de responder após o envio da cotação e 7 dias de follow-up${m.cotacoes ? ` (${esc(fmt.pct((m.pararamResponder / m.cotacoes) * 100))} das cotações)` : ''}.</div>` : '';
-  return rows + lost;
+  return svg + lost;
 }
 
 function trendHtml(c) {

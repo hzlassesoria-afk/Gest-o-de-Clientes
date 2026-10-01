@@ -51,11 +51,21 @@ h2.section { font-family: var(--font-display); font-size: 17px; font-weight: 600
 .pill.bad { background: var(--bad-bg); color: var(--bad); }
 
 .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; }
-.funnel-row { display: grid; grid-template-columns: 200px 1fr 130px; gap: 12px; align-items: center; padding: 6px 0; }
-.funnel-bar { height: 22px; background: var(--bg); border-radius: 6px; overflow: hidden; }
-.funnel-bar > div { height: 100%; background: var(--bar); border-radius: 6px; min-width: 2px; }
-.funnel-row .nums { text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; color: var(--muted); }
-.funnel-row .nums b { color: var(--text); }
+/* Métricas de resultado: cards à esquerda, funil à direita */
+.resultado { display: grid; grid-template-columns: minmax(0, 3fr) minmax(300px, 2fr); gap: 16px; align-items: start; }
+.resultado .grid { grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); }
+.fn-panel { position: sticky; top: 12px; min-width: 0; }
+.fn-title { margin: 0 0 8px; font-family: var(--font-display); font-size: 15px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.fn-svg { display: block; width: 100%; height: auto; }
+.fn-tier { stroke: var(--bg); stroke-width: 2; }
+.fn-t0 { fill: #e8590c; } .fn-t1 { fill: #d9480f; } .fn-t2 { fill: #c2410c; } .fn-t3 { fill: #a63a0b; } .fn-t4 { fill: #8a2f09; }
+.fn-num { fill: #fffcf8; font-family: var(--font-display); font-size: 28px; font-weight: 700; }
+.fn-label { fill: #fffcf8; font-size: 12px; }
+.fn-arrow { stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.fn-conv { fill: var(--text); font-size: 12px; font-weight: 600; }
+.fn-total { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); color: var(--muted); font-size: 13px; }
+.fn-total b { color: var(--accent); }
+@media (max-width: 1100px) { .resultado { grid-template-columns: minmax(0, 1fr); } .fn-panel { position: static; } }
 .lost { margin-top: 8px; padding-top: 10px; border-top: 1px dashed var(--border); color: var(--muted); font-size: 13px; }
 
 table.data { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 14px; }
@@ -93,8 +103,6 @@ dl.kv dt { color: var(--muted); }
   .sidebar { border-right: 0; border-bottom: 1px solid var(--border); }
   #client-list { flex-direction: row; flex-wrap: wrap; }
   .main { padding: 18px 16px 50px; }
-  .funnel-row { grid-template-columns: 1fr; gap: 4px; }
-  .funnel-row .nums { text-align: left; }
   .form-grid { grid-template-columns: 1fr; }
   .card.wide { grid-column: auto; }
   dl.kv { grid-template-columns: 1fr; }

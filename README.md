@@ -8,7 +8,7 @@ npm test
 ```
 
 ## Abas da página do cliente
-1. **Métricas do Projeto** – resultado do cliente (investimento no Meta, leads, CPL, qualificados, CPL qualificado, respostas ao 1º contato, cotações, pararam de responder pós follow-up, negociações, vendas, ticket médio, ROAS, CAC) + funil + gestão (tempo de projeto, inadimplência, MRR, Time to Value, NPS, Health Score, índice de reclamação, reuniões de alinhamento, nível de ansiedade, dinheiro coletado) + evolução mensal.
+1. **Métricas do Projeto** – resultado do cliente (investimento no Meta, leads, CPL, qualificados, CPL qualificado, respostas ao 1º contato, cotações, pararam de responder pós follow-up, negociações, vendas, ticket médio, ROAS, CAC) (com o **funil comercial** em formato de funil ao lado dos cards: leads → qualificados → cotações → negociação → vendas, com a conversão entre etapas) + gestão (tempo de projeto, inadimplência, MRR, Time to Value, NPS, Health Score, índice de reclamação, reuniões de alinhamento, nível de ansiedade, dinheiro coletado) + evolução mensal.
 2. **Metas (Rotina Comercial)** – meta do mês que se desdobra sozinha em semanas e dias úteis (ver abaixo).
 3. **Entrada de Clientes (Monday)** – dados do cliente puxados do quadro do Monday.
 
