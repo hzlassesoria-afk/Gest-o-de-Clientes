@@ -110,3 +110,20 @@ test('toda chave dos indicadores existe no resultado de compute()', () => {
   for (const g of Metrics.INDICATORS) for (const d of g.items) assert.ok(d.key in m, d.key);
   assert.equal(m.aderenciaReunioesPct, 75);
 });
+
+test('volume de vendas soma no período e a comissão estimada usa a faixa do projeto (padrão 250% a 400%)', () => {
+  const c = {
+    project: {},
+    months: { '2026-08': { volumeVendas: 4000 }, '2026-09': { volumeVendas: 6000 } },
+  };
+  const r = Metrics.compute(c, ['2026-08', '2026-09']);
+  assert.equal(r.volumeVendas, 10000);
+  assert.equal(r.comissaoMin, 25000);
+  assert.equal(r.comissaoMax, 40000);
+  const custom = Metrics.compute({ ...c, project: { comissaoMin: 200, comissaoMax: 300 } }, ['2026-09']);
+  assert.equal(custom.comissaoMin, 12000);
+  assert.equal(custom.comissaoMax, 18000);
+  const vazio = Metrics.compute({ project: {}, months: { '2026-09': {} } }, ['2026-09']);
+  assert.equal(vazio.volumeVendas, null);
+  assert.equal(vazio.comissaoMin, null);
+});

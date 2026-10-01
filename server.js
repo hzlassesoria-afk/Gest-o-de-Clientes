@@ -50,7 +50,7 @@ const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const METRIC_FIELDS = new Set([
   'investimento', 'leads', 'leadsQualificados', 'leadsResponderam', 'cotacoes', 'pararamResponder',
-  'negociacoes', 'vendas', 'receita', 'mrr', 'faturado', 'inadimplente', 'dinheiroColetado', 'nps',
+  'negociacoes', 'vendas', 'volumeVendas', 'receita', 'mrr', 'faturado', 'inadimplente', 'dinheiroColetado', 'nps',
   'healthScore', 'reclamacoes', 'contatosCliente', 'reunioesRealizadas', 'reunioesPlanejadas',
   'contatosEspontaneos', 'observacoes',
 ]);
@@ -151,7 +151,7 @@ function cleanProject(input) {
     else if (DATE_RE.test(v)) out[k] = v;
     else throw Object.assign(new Error(`Data inválida em "${k}" (use AAAA-MM-DD)`), { status: 400 });
   }
-  for (const k of ['mrr', 'roasTarget']) {
+  for (const k of ['mrr', 'roasTarget', 'comissaoMin', 'comissaoMax']) {
     if (!(k in input)) continue;
     const v = input[k];
     if (v === '' || v == null) out[k] = null;

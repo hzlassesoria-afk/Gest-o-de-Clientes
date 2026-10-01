@@ -12,13 +12,14 @@
   // Campos brutos somáveis (acumulam no período)
   const SUM_FIELDS = [
     'investimento', 'leads', 'leadsQualificados', 'leadsResponderam', 'cotacoes',
-    'pararamResponder', 'negociacoes', 'vendas', 'receita',
+    'pararamResponder', 'negociacoes', 'vendas', 'volumeVendas', 'receita',
     'faturado', 'inadimplente', 'dinheiroColetado',
     'reclamacoes', 'contatosCliente', 'reunioesRealizadas', 'reunioesPlanejadas',
     'contatosEspontaneos',
   ];
 
   const SEMANAS_POR_MES = 4.33;
+  const DEFAULT_COMMISSION = { min: 250, max: 400 }; // % do volume de vendas
 
   const num = (v) => (v === '' || v == null || Number.isNaN(Number(v)) ? null : Number(v));
   const div = (a, b) => (a == null || b == null || b === 0 ? null : a / b);
@@ -131,6 +132,11 @@
       ? investimento
       : (investimento == null ? null : investimento + mensalidades);
 
+    const commission = {
+      min: num(project.comissaoMin) ?? DEFAULT_COMMISSION.min,
+      max: num(project.comissaoMax) ?? DEFAULT_COMMISSION.max,
+    };
+
     const result = {
       // ---- Resultado do cliente ----
       investimento,
@@ -143,6 +149,12 @@
       pararamResponder: s.pararamResponder,
       negociacoes: s.negociacoes,
       vendas: s.vendas,
+      volumeVendas: s.volumeVendas,
+      // Comissão estimada = volume vendido × faixa de comissão do projeto (% do volume; padrão 250% a 400%)
+      comissaoMinPct: commission.min,
+      comissaoMaxPct: commission.max,
+      comissaoMin: s.volumeVendas == null ? null : s.volumeVendas * commission.min / 100,
+      comissaoMax: s.volumeVendas == null ? null : s.volumeVendas * commission.max / 100,
       receita: s.receita,
       ticketMedio: div(s.receita, s.vendas),
       roas: div(s.receita, investimento),
@@ -226,6 +238,7 @@
       { key: 'pararamResponder', label: 'Pararam de responder (pós follow-up)', fmt: 'int', good: 'down', kind: 'rel' },
       { key: 'negociacoes', label: 'Em negociação', fmt: 'int', good: 'up', kind: 'rel' },
       { key: 'vendas', label: 'Vendas', fmt: 'int', good: 'up', kind: 'rel' },
+      { key: 'volumeVendas', label: 'Volume de vendas (valor total)', fmt: 'brl', good: 'up', kind: 'rel' },
       { key: 'receita', label: 'Receita gerada em vendas', fmt: 'brl', good: 'up', kind: 'rel' },
       { key: 'ticketMedio', label: 'Ticket médio', fmt: 'brl', good: 'up', kind: 'rel' },
       { key: 'roas', label: 'ROAS', fmt: 'x', good: 'up', kind: 'rel' },
@@ -260,5 +273,5 @@
     return { value, dir, tone, kind: def.kind, unit: def.unit };
   }
 
-  return { compute, series, sumMonths, INDICATORS, INDICATOR_BY_KEY, change, SUM_FIELDS, daysBetween, monthsBetween, anxietyLevel, healthBand, computeHealth };
+  return { compute, series, sumMonths, INDICATORS, INDICATOR_BY_KEY, change, SUM_FIELDS, DEFAULT_COMMISSION, daysBetween, monthsBetween, anxietyLevel, healthBand, computeHealth };
 });

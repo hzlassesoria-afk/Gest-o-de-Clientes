@@ -128,6 +128,7 @@ function renderMetrics() {
       ${card('Pararam de responder (pós 7 dias de follow-up)', m.pararamResponder, 'int', dlt('pararamResponder'))}
       ${card('Em negociação', m.negociacoes, 'int', dlt('negociacoes'))}
       ${card('Vendas', m.vendas, 'int', ofLeads(m.vendas) + dlt('vendas'))}
+      ${card('Volume de vendas (valor total)', m.volumeVendas, 'brl', commissionNote(m) + dlt('volumeVendas'), 'wide')}
       ${card('Ticket médio', m.ticketMedio, 'brl', (m.receita != null ? `Receita gerada: ${esc(fmt.brl(m.receita))}` : '') + dlt('ticketMedio'))}
       ${card('ROAS', m.roas, 'x', 'Receita ÷ investimento no Meta' + dlt('roas'))}
       ${card('CAC', m.cac, 'brl', (c.project.cacIncludesFee === false ? 'Investimento ÷ vendas' : '(Investimento + mensalidade) ÷ vendas') + dlt('cac'))}
@@ -306,6 +307,12 @@ function healthNote(m) {
   return 'Calculado: ' + m.healthScoreAuto.parts.map((p) => esc(p.key)).join(', ');
 }
 
+// Comissão estimada a partir do volume vendido (faixa do projeto, % do volume)
+function commissionNote(m) {
+  if (m.comissaoMin == null) return 'Informe o volume em “Registrar dados do mês”';
+  return `Comissão estimada (${esc(fmt.dec(m.comissaoMinPct))}% a ${esc(fmt.dec(m.comissaoMaxPct))}%): <b>${esc(fmt.brl(m.comissaoMin))}</b> a <b>${esc(fmt.brl(m.comissaoMax))}</b>`;
+}
+
 function funnelHtml(m) {
   const svg = Funnel.build({ m, fmtInt: fmt.int, fmtPct: fmt.pct });
   if (!svg) return '<div class="empty-state">Sem dados de funil neste período.</div>';
@@ -319,10 +326,10 @@ function trendHtml(c) {
   if (!rows.length) return '<div class="panel empty-state">A evolução aparece aqui depois do primeiro lançamento mensal.</div>';
   const cell = (v, f) => (v == null ? '—' : esc(fmt[f](v)));
   const table = `<div class="panel scroll"><table class="data"><thead><tr>
-    <th>Mês</th><th>Investimento</th><th>Leads</th><th>CPL</th><th>Qualificados</th><th>Vendas</th><th>Receita</th><th>ROAS</th><th>CAC</th><th>NPS</th><th>Health</th>
+    <th>Mês</th><th>Investimento</th><th>Leads</th><th>CPL</th><th>Qualificados</th><th>Vendas</th><th>Volume</th><th>Receita</th><th>ROAS</th><th>CAC</th><th>NPS</th><th>Health</th>
     </tr></thead><tbody>${rows.map((r) => `<tr>
     <td>${esc(monthLabel(r.month))}${c.months[r.month] && c.months[r.month]._demo ? ' <span class="pill warn">simulado</span>' : ''}</td><td>${cell(r.investimento, 'brl')}</td><td>${cell(r.leads, 'int')}</td><td>${cell(r.cpl, 'brl')}</td>
-    <td>${cell(r.leadsQualificados, 'int')}</td><td>${cell(r.vendas, 'int')}</td><td>${cell(r.receita, 'brl')}</td>
+    <td>${cell(r.leadsQualificados, 'int')}</td><td>${cell(r.vendas, 'int')}</td><td>${cell(r.volumeVendas, 'brl')}</td><td>${cell(r.receita, 'brl')}</td>
     <td>${cell(r.roas, 'x')}</td><td>${cell(r.cac, 'brl')}</td><td>${cell(r.nps, 'nps')}</td><td>${cell(r.healthScore, 'int')}</td>
     </tr>`).join('')}</tbody></table></div>`;
   return chartHtml(rows) + table;
@@ -714,7 +721,7 @@ const MONTH_FIELDS = [
     ['investimento', 'Investimento no Meta (R$)'], ['leads', 'Leads'], ['leadsQualificados', 'Leads qualificados'],
     ['leadsResponderam', 'Leads que responderam o 1º contato'], ['cotacoes', 'Cotações enviadas'],
     ['pararamResponder', 'Pararam de responder (pós envio + 7 dias de follow-up)'], ['negociacoes', 'Em negociação'],
-    ['vendas', 'Vendas'], ['receita', 'Receita gerada em vendas (R$)'],
+    ['vendas', 'Vendas'], ['volumeVendas', 'Volume de vendas — valor total (R$)'], ['receita', 'Receita gerada em vendas (R$)'],
   ]],
   ['Gestão — financeiro', [
     ['mrr', 'MRR do mês (R$)'], ['faturado', 'Valor faturado (R$)'], ['inadimplente', 'Valor inadimplente (R$)'],
@@ -777,6 +784,8 @@ function openProjectDialog() {
       ${date('campaignStartDate', 'Início das campanhas')}${date('firstSaleDate', 'Primeira venda')}
       <label>MRR padrão (R$)<input type="number" step="any" name="mrr" value="${esc(p.mrr ?? '')}"></label>
       <label>Meta de ROAS (para o Health Score)<input type="number" step="any" name="roasTarget" value="${esc(p.roasTarget ?? '')}"></label>
+      <label>Comissão mínima (% do volume)<input type="number" step="any" min="0" name="comissaoMin" placeholder="250" value="${esc(p.comissaoMin ?? '')}"></label>
+      <label>Comissão máxima (% do volume)<input type="number" step="any" min="0" name="comissaoMax" placeholder="400" value="${esc(p.comissaoMax ?? '')}"></label>
       <label class="full" style="flex-direction:row;align-items:center;gap:8px">
         <input type="checkbox" name="cacIncludesFee" ${p.cacIncludesFee === false ? '' : 'checked'}>
         Incluir a mensalidade da agência (MRR) no cálculo do CAC</label>
