@@ -33,66 +33,87 @@ test('calendário: semanas seg-sex, primeira semana parcial', () => {
   assert.equal(r.weeks[4].workingDays, 5);
 });
 
-test('meta mensal se divide igualmente por dias úteis quando nada foi lançado (futuro)', () => {
+test('meta mensal vira inteiros por semana e por dia (pessoas), e dinheiro continua com centavos', () => {
   const r = Goals.compute(FEV, goal(), '2027-02-01');
   assert.equal(r.workingDays, 20);
   assert.equal(r.weeks.length, 4);
-  near(r.weeks[0].rows.vendas.meta, 2.5);
-  near(day(0, 0, r).rows.vendas.meta, 0.5);
-  near(day(3, 4, r).rows.investimento.meta, 200);
-  near(day(2, 1, r).rows.cotacoes.meta, 2);
-  // metas derivadas: leads = investimento ÷ CPL ; qualificados = investimento ÷ CPLQ
-  near(r.rows.leads.meta, 200);
-  near(r.rows.leadsQualificados.meta, 80);
+  // pessoas: tudo inteiro e a soma fecha com o mês
+  for (const k of ['leads', 'leadsQualificados', 'cotacoes', 'negociacoes', 'vendas']) {
+    for (const w of r.weeks) {
+      assert.ok(Number.isInteger(w.rows[k].meta), `${k} semana ${w.n}: ${w.rows[k].meta}`);
+      for (const d of w.days) if (d.working) assert.ok(Number.isInteger(d.rows[k].meta), `${k} ${d.date}: ${d.rows[k].meta}`);
+      assert.equal(w.days.filter((d) => d.working).reduce((s, d) => s + d.rows[k].meta, 0), w.rows[k].meta, `${k} dias somam a semana`);
+    }
+    assert.equal(r.weeks.reduce((s, w) => s + w.rows[k].meta, 0), r.rows[k].meta, `${k} semanas somam o mês`);
+  }
+  assert.deepEqual(r.weeks.map((w) => w.rows.vendas.meta), [3, 2, 3, 2]); // 10 vendas espalhadas
+  assert.deepEqual(r.weeks[0].days.map((d) => d.rows.vendas.meta), [1, 1, 0, 1, 0]);
+  assert.equal(day(2, 1, r).rows.cotacoes.meta, 2);  // 40 cotações em 20 dias
+  assert.equal(day(0, 0, r).rows.leads.meta, 10);    // 200 leads em 20 dias
+  assert.equal(r.rows.leadsQualificados.meta, 80);
+  near(day(3, 4, r).rows.investimento.meta, 200);    // dinheiro: fracionado normalmente
+  near(r.weeks[0].rows.investimento.meta, 1000);
   // custo é teto: igual em todos os níveis
   assert.equal(r.rows.cpl.meta, 20);
   assert.equal(day(1, 3, r).rows.cplQualificado.meta, 50);
 });
 
-test('não bateu a meta do dia 01 → a meta do dia 02 sobe', () => {
-  const g = goal({ days: { '2027-02-01': { vendas: 0 } } });
+test('total do mês quebrado é arredondado para cima (pessoas)', () => {
+  const { targets } = Goals.resolveTargets({ investimento: 6000, itens: { leads: { modo: 'custo', valor: 70 }, vendas: { modo: 'numero', valor: 2.2 } } });
+  assert.equal(targets.leads, 86);   // 6000 ÷ 70 = 85,7
+  assert.equal(targets.vendas, 3);
+  const t2 = Goals.resolveTargets({ investimento: 6000, itens: { leads: { modo: 'numero', valor: 85 }, leadsQualificados: { modo: 'taxa', valor: 33 } } }).targets;
+  assert.equal(t2.leadsQualificados, 29); // 28,05 → 29
+  assert.equal(Goals.resolveTargets({ investimento: 6000, itens: { leads: { modo: 'custo', valor: 30 } } }).targets.leads, 200); // exato não sobe
+});
+
+test('não bateu a meta do dia 01 → a meta do dia 02 sobe (em inteiros)', () => {
+  const g = goal({ meta: { vendas: 20 }, days: { '2027-02-01': { vendas: 0 } } }); // 1 venda por dia útil
   const r = Goals.compute(FEV, g, '2027-02-02');
-  near(day(0, 0, r).rows.vendas.meta, 0.5);
-  // semana: 2,5 − 0 = 2,5 em 4 dias → 0,625
-  near(day(0, 1, r).rows.vendas.meta, 0.625);
+  assert.equal(day(0, 0, r).rows.vendas.meta, 1);
+  assert.equal(day(0, 1, r).rows.vendas.meta, 2);
   assert.equal(day(0, 1, r).rows.vendas.raised, true);
   assert.equal(day(0, 0, r).rows.vendas.raised, false);
-  // sexta absorve o resto: nada é perdido dentro da semana
-  near(day(0, 4, r).rows.vendas.meta, 0.625);
+  assert.deepEqual(r.weeks[0].days.map((d) => d.rows.vendas.meta), [1, 2, 1, 1, 1]); // a semana continua somando 5
 });
 
 test('dia sem lançamento no passado conta como 0 e é sinalizado', () => {
-  const r = Goals.compute(FEV, goal(), '2027-02-03'); // dias 01 e 02 passaram sem lançamento
+  const r = Goals.compute(FEV, goal({ meta: { vendas: 20 } }), '2027-02-03'); // dias 01 e 02 passaram sem lançamento
   assert.deepEqual(r.semLancamento, ['2027-02-01', '2027-02-02']);
-  near(day(0, 2, r).rows.vendas.meta, 2.5 / 3); // hoje (qua) precisa cobrir 2,5 em 3 dias
+  assert.equal(day(0, 2, r).rows.vendas.meta, 2); // faltam 5 em 3 dias e a semana está atrasada: puxa para cima
+  assert.ok(Number.isInteger(day(0, 2, r).rows.vendas.meta));
 });
 
 test('não bateu a meta da semana 01 → a meta da semana 02 sobe', () => {
   const days = {};
-  ['01', '02', '03', '04', '05'].forEach((d) => { days[`2027-02-${d}`] = { vendas: 0.3, cotacoes: 1 }; });
-  const r = Goals.compute(FEV, goal({ days }), '2027-02-08');
-  near(r.weeks[0].rows.vendas.realizado, 1.5);
-  // restam 10 − 1,5 = 8,5 em 15 dias úteis → semana 2 (5 dias) = 2,8333
-  near(r.weeks[1].rows.vendas.meta, (8.5 * 5) / 15);
-  near(r.weeks[1].rows.vendas.base, 2.5);
+  ['01', '02', '03', '04', '05'].forEach((d) => { days[`2027-02-${d}`] = { vendas: 0, cotacoes: 1 }; });
+  const r = Goals.compute(FEV, goal({ meta: { vendas: 20, cotacoes: 40 }, days }), '2027-02-08');
+  assert.equal(r.weeks[0].rows.vendas.realizado, 0);
+  assert.equal(r.weeks[1].rows.vendas.base, 5);
+  assert.ok(r.weeks[1].rows.vendas.meta > 5);
+  assert.ok(Number.isInteger(r.weeks[1].rows.vendas.meta));
   assert.equal(r.weeks[1].rows.vendas.raised, true);
-  // e a semana 3 continua em 2,5 enquanto a 02 ainda é projetada para ser batida
-  near(r.weeks[2].rows.vendas.meta, (8.5 - r.weeks[1].rows.vendas.meta) / 10 * 5);
-  // cotações: 5 de 10 esperadas → semana 2 sobe também
-  near(r.weeks[1].rows.cotacoes.meta, ((40 - 5) * 5) / 15);
+  // o que faltava (20) continua sendo o total projetado: semanas 2 a 4 somam o mês inteiro
+  assert.equal(r.weeks.slice(1).reduce((s, w) => s + w.rows.vendas.meta, 0), 20);
+  // cotações: 5 de 10 esperadas na semana 1 → semana 2 sobe também
+  assert.ok(r.weeks[1].rows.cotacoes.meta > r.weeks[1].rows.cotacoes.base);
 });
 
 test('superou a meta: por padrão a próxima meta não cai abaixo da base', () => {
-  const g = goal({ days: { '2027-02-01': { vendas: 5 } } });
+  const g = goal({ meta: { vendas: 20 }, days: { '2027-02-01': { vendas: 5 } } });
   const r = Goals.compute(FEV, g, '2027-02-02');
-  near(day(0, 1, r).rows.vendas.meta, 0.5);
+  assert.equal(day(0, 1, r).rows.vendas.meta, 1);
   assert.equal(day(0, 1, r).rows.vendas.raised, false);
 });
 
 test('compensarExcedente: superar reduz as metas seguintes', () => {
-  const g = goal({ compensarExcedente: true, days: { '2027-02-01': { vendas: 1.5 } } });
+  const g = goal({ meta: { vendas: 20 }, compensarExcedente: true, days: { '2027-02-01': { vendas: 3 } } });
   const r = Goals.compute(FEV, g, '2027-02-02');
-  near(day(0, 1, r).rows.vendas.meta, (2.5 - 1.5) / 4); // 0,25
+  // a semana (5) já tem 3 feitos no dia 01: faltam 2, espalhados nos 4 dias restantes (nada de 1 por dia)
+  const resto = r.weeks[0].days.slice(1).map((d) => d.rows.vendas.meta);
+  assert.ok(resto.every(Number.isInteger));
+  assert.equal(resto.reduce((a, b) => a + b, 0), 2);
+  assert.ok(day(0, 1, r).rows.vendas.meta <= 1);
 });
 
 test('realizado semanal/mensal soma os dias; CPL é razão dos totais, não média', () => {
@@ -121,13 +142,14 @@ test('CPL do período usa totais ponderados', () => {
 });
 
 test('folga: dia desligado não recebe meta e a semana redistribui', () => {
-  const g = goal({ naoUteis: ['2027-02-03'] }); // quarta da semana 1
+  const g = goal({ naoUteis: ['2027-02-03'], meta: { investimento: 4000, vendas: 19 } }); // quarta da semana 1; 19 dias úteis = 1 por dia
   const r = Goals.compute(FEV, g, '2027-02-01');
   assert.equal(r.workingDays, 19);
   assert.equal(day(0, 2, r).working, false);
   assert.equal(day(0, 2, r).rows.vendas.meta, null);
-  near(r.weeks[0].rows.vendas.meta, (10 * 4) / 19);
-  near(day(0, 0, r).rows.vendas.meta, ((10 * 4) / 19) / 4);
+  assert.equal(r.weeks[0].rows.vendas.meta, 4);
+  assert.deepEqual(r.weeks[0].days.filter((d) => d.working).map((d) => d.rows.vendas.meta), [1, 1, 1, 1]);
+  near(r.weeks[0].rows.investimento.meta, (4000 * 4) / 19); // dinheiro segue proporcional, com centavos
 });
 
 test('sem meta definida, não inventa meta nem quebra', () => {
@@ -245,6 +267,20 @@ test('meta definida por % também compensa dia/semana como qualquer outra', () =
   const g = nova({ leads: { modo: 'numero', valor: 400 }, vendas: { modo: 'taxa', valor: 5 } }, // 20 vendas no mês, 1 por dia útil
     { days: { '2027-02-01': { vendas: 0 } } });
   const r = Goals.compute(FEV, g, '2027-02-02');
-  near(day(0, 0, r).rows.vendas.base, 1);
-  near(day(0, 1, r).rows.vendas.meta, 5 / 4); // semana 5 vendas, nenhuma no dia 01 → 1,25 por dia nos 4 restantes
+  assert.equal(day(0, 0, r).rows.vendas.base, 1);
+  assert.equal(day(0, 1, r).rows.vendas.meta, 2);
+  assert.equal(day(0, 1, r).rows.vendas.raised, true);
+});
+
+
+test('dia com meta 0 que mesmo assim vendeu aparece como bom; sem venda fica neutro', () => {
+  const r = Goals.compute(FEV, goal({ days: { '2027-02-03': { vendas: 1 } } }), '2027-02-01'); // nada encerrado ainda
+  assert.equal(day(0, 2, r).rows.vendas.meta, 0);
+  assert.equal(day(0, 2, r).rows.vendas.tone, 'good');
+  assert.equal(day(0, 4, r).rows.vendas.tone, null); // sexta (meta 0), sem lançamento
+});
+
+test('linhas de pessoas são marcadas como inteiras (para o formulário)', () => {
+  const inteiras = Goals.ROWS.filter((r) => r.integer).map((r) => r.key);
+  assert.deepEqual(inteiras, ['leads', 'leadsQualificados', 'cotacoes', 'negociacoes', 'vendas']);
 });

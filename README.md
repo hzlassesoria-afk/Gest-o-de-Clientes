@@ -37,7 +37,8 @@ Ao lado de cada etapa aparece o que a escolha equivale nas outras formas (númer
 - **Compensação**: meta da semana = (meta do mês − realizado até a semana anterior) ÷ dias úteis que faltam × dias úteis da semana. Meta do dia = (meta da semana − realizado na semana até ontem) ÷ dias úteis que faltam na semana. Ficou abaixo → a meta seguinte sobe (▲). Superou → a meta seguinte não cai abaixo da base (opção na meta do mês faz ela cair).
 - **Dia sem lançamento** no passado conta como zero (e é avisado); hoje e o futuro são projetados como "meta batida".
 - **Linhas de custo** (por lead, por lead qualificado e, quando você escolhe custo, por cotação, negociação ou venda) são tetos fixos: a meta de custo é a mesma em todos os níveis; o realizado é investimento ÷ quantidade do período (razão dos totais, nunca média de médias). Leads e leads qualificados entram como linhas de apoio, com meta = investimento ÷ custo.
-- Metas de cotação, negociação e vendas podem ficar fracionadas (ex.: 0,5 venda/dia) — é o ritmo diário esperado.
+- **Pessoas são sempre números inteiros** (leads, qualificados, cotações, negociações, vendas): o total do mês é arredondado para cima (ex.: R$ 6.000 ÷ R$ 70 = 85,7 → 86 leads) e a divisão por semana e por dia também (10 vendas em 20 dias úteis = 1 venda em dias alternados). Quando o período fica abaixo, o que falta é puxado para os próximos dias, em inteiros (ex.: 1 por dia, o dia 01 fechou 0 → o dia 02 vira 2). Só o valor investido tem centavos. Os campos de realizado e o "número exato" da meta só aceitam inteiros.
+- **Infográfico ao lado da meta**: escolha a métrica e veja por dia útil o realizado (barras) contra a meta do dia (traço), ou o acumulado do mês contra a meta acumulada. Linhas de custo mostram o custo do dia (ou acumulado) contra o teto.
 
 ## Integração com o Monday
 Defina um token pessoal (Monday → avatar → Developers → My access tokens):

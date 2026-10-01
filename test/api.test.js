@@ -147,3 +147,17 @@ test('metas: meta por número, porcentagem ou custo é validada e substitui a an
   assert.deepEqual(r.body.goals['2027-03'].meta, { investimento: 100, itens: { vendas: { modo: 'numero', valor: 3 } } });
   await call(base, 'DELETE');
 });
+
+test('metas: pessoas só aceitam número inteiro (realizado e meta por número), dinheiro aceita centavos', async () => {
+  const base = '/api/clients/petra-seguros/goals/2027-04';
+  let r = await call(base, 'PUT', { meta: { investimento: 1000.5, itens: { vendas: { modo: 'numero', valor: 10 } } } });
+  assert.equal(r.status, 200);
+  assert.equal((await call(base, 'PUT', { meta: { itens: { vendas: { modo: 'numero', valor: 2.5 } } } })).status, 400);
+  assert.equal((await call(base, 'PUT', { meta: { itens: { vendas: { modo: 'taxa', valor: 12.5 } } } })).status, 200); // % pode ter casa decimal
+  assert.equal((await call(base, 'PUT', { meta: { itens: { vendas: { modo: 'custo', valor: 99.9 } } } })).status, 200);  // custo também
+  assert.equal((await call(`${base}/days/2027-04-01`, 'PUT', { vendas: 1.5 })).status, 400);
+  assert.equal((await call(`${base}/days/2027-04-01`, 'PUT', { leads: 0.5 })).status, 400);
+  r = await call(`${base}/days/2027-04-01`, 'PUT', { investimento: 123.45, vendas: 2, leads: '7' });
+  assert.deepEqual(r.body.goals['2027-04'].days['2027-04-01'], { investimento: 123.45, vendas: 2, leads: 7 });
+  await call(base, 'DELETE');
+});

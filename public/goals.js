@@ -9,6 +9,12 @@
  * Se ficou abaixo, a meta seguinte sobe. Se superou, por padrão a meta seguinte
  * NÃO cai abaixo da meta-base (opção `compensarExcedente` faz ela cair).
  *
+ * Metas de pessoas (leads, qualificados, cotações, negociações, vendas) são sempre números
+ * inteiros: o total do mês é arredondado para cima e a divisão por semana e por dia usa
+ * inteiros (ex.: 10 vendas em 20 dias úteis = 1 venda em dias alternados). Quando o período
+ * fica abaixo, o que falta é puxado para os próximos dias, também em inteiros.
+ * Só o valor investido (dinheiro) é dividido com centavos.
+ *
  * Cada etapa do funil (leads, qualificados, cotações, negociações, vendas) pode ser
  * definida na meta do mês de três jeitos:
  *   - número exato;
@@ -43,15 +49,15 @@
   // Linhas exibidas, na ordem do funil
   const ROWS = [
     { key: 'investimento', label: 'Valor investido', fmt: 'brl', kind: 'volume', input: true },
-    { key: 'leads', label: 'Leads', fmt: 'dec', kind: 'volume', input: true, support: true },
+    { key: 'leads', label: 'Leads', fmt: 'int', kind: 'volume', input: true, support: true, integer: true },
     { key: 'cpl', label: 'Custo por lead', fmt: 'brl', kind: 'cost', numerator: 'investimento', denominator: 'leads', stage: 'leads' },
-    { key: 'leadsQualificados', label: 'Leads qualificados', fmt: 'dec', kind: 'volume', input: true, support: true },
+    { key: 'leadsQualificados', label: 'Leads qualificados', fmt: 'int', kind: 'volume', input: true, support: true, integer: true },
     { key: 'cplQualificado', label: 'Custo por lead qualificado', fmt: 'brl', kind: 'cost', numerator: 'investimento', denominator: 'leadsQualificados', stage: 'leadsQualificados' },
-    { key: 'cotacoes', label: 'Cotação', fmt: 'dec', kind: 'volume', input: true },
+    { key: 'cotacoes', label: 'Cotação', fmt: 'int', kind: 'volume', input: true, integer: true },
     { key: 'custoCotacao', label: 'Custo por cotação', fmt: 'brl', kind: 'cost', numerator: 'investimento', denominator: 'cotacoes', stage: 'cotacoes', optional: true },
-    { key: 'negociacoes', label: 'Negociação', fmt: 'dec', kind: 'volume', input: true },
+    { key: 'negociacoes', label: 'Negociação', fmt: 'int', kind: 'volume', input: true, integer: true },
     { key: 'custoNegociacao', label: 'Custo por negociação', fmt: 'brl', kind: 'cost', numerator: 'investimento', denominator: 'negociacoes', stage: 'negociacoes', optional: true },
-    { key: 'vendas', label: 'Vendas', fmt: 'dec', kind: 'volume', input: true },
+    { key: 'vendas', label: 'Vendas', fmt: 'int', kind: 'volume', input: true, integer: true },
     { key: 'custoVenda', label: 'Custo por venda', fmt: 'brl', kind: 'cost', numerator: 'investimento', denominator: 'vendas', stage: 'vendas', optional: true },
   ];
 
@@ -157,24 +163,29 @@
    *   `custo` (R$ por unidade) e `taxa` (% da etapa anterior com meta) são sempre calculados,
    *   mesmo quando a etapa foi definida de outro jeito, para mostrar as equivalências.
    */
+  // Arredonda para cima, tolerando ruído de ponto flutuante (79,999999999 vira 80)
+  const ceilInt = (x) => Math.ceil(x - 1e-9);
+
   function resolveTargets(meta) {
     const n = normalizeMeta(meta);
     const inv = n.investimento;
     const targets = { investimento: inv };
     const info = {};
-    let base = null; // total da última etapa que tem meta
+    let base = null; // total (inteiro) da última etapa que tem meta
     for (const k of STAGES) {
       const { modo, valor } = n.itens[k];
-      let total = null;
+      let raw = null;
       if (valor != null) {
-        if (modo === 'numero') total = valor;
-        else if (modo === 'custo') total = div(inv, valor);
-        else if (modo === 'taxa') total = base != null ? (base * valor) / 100 : null;
+        if (modo === 'numero') raw = valor;
+        else if (modo === 'custo') raw = div(inv, valor);
+        else if (modo === 'taxa') raw = base != null ? (base * valor) / 100 : null;
       }
+      const total = raw == null ? null : ceilInt(raw); // pessoas: sempre inteiro, para cima
       targets[k] = total;
       info[k] = {
         modo, total,
-        custo: total != null && total > 0 ? div(inv, total) : (modo === 'custo' ? valor : null),
+        // No modo custo, o teto é o valor digitado; nos outros, o custo que a meta implica
+        custo: modo === 'custo' && valor != null ? valor : (total != null && total > 0 ? div(inv, total) : null),
         taxa: total != null && base ? (total / base) * 100 : null,
       };
       if (total != null) base = total;
@@ -183,10 +194,15 @@
   }
 
   /**
-   * Distribui a meta de UMA métrica de volume por semanas e dias úteis, com compensação.
+   * Distribui a meta de UMA métrica por semanas e dias úteis, com compensação.
+   * `integer`: metas em números inteiros (pessoas); senão, contínuo (dinheiro).
    * @returns {{ week: Object<number,{meta,base}>, day: Object<string,{meta,base}> }}
    */
-  function distribute(total, weeks, realized, today, compensarExcedente) {
+  function distribute(total, weeks, realized, today, compensar, integer) {
+    return integer ? distributeInt(total, weeks, realized, today, compensar) : distributeCont(total, weeks, realized, today, compensar);
+  }
+
+  function distributeCont(total, weeks, realized, today, compensarExcedente) {
     const out = { week: {}, day: {} };
     const workingCount = (w) => w.days.filter((d) => d.working).length;
     let remDays = weeks.reduce((s, w) => s + workingCount(w), 0);
@@ -220,6 +236,61 @@
     return out;
   }
 
+  // Parte do que falta (R) que cabe nos próximos n dias, entre m dias restantes, em inteiros.
+  // Dentro do ritmo: arredonda (espalha por igual, ex.: 10 em 20 dias = dias alternados).
+  // Abaixo do ritmo (`atrasado`): arredonda para cima, puxando o que falta para já.
+  function share(R, m, n, atrasado) {
+    let r = Math.max(R, 0), left = m, s = 0;
+    for (let i = 0; i < n && left > 0; i++) {
+      const a = atrasado ? Math.ceil(r / left - 1e-9) : Math.round(r / left);
+      s += a; r -= a; left--;
+    }
+    return s;
+  }
+
+  function distributeInt(total, weeks, realized, today, compensarExcedente) {
+    const out = { week: {}, day: {} };
+    const workingCount = (w) => w.days.filter((d) => d.working).length;
+    const N = weeks.reduce((s, w) => s + workingCount(w), 0);
+    if (total == null || N === 0) return out;
+    let remDays = N;
+    let doneBefore = 0;          // realizado (ou projetado) até a semana anterior
+    let baseRem = total, baseLeft = N; // ritmo-base: o que falta se tudo fosse batido
+
+    for (const w of weeks) {
+      const nw = workingCount(w);
+      if (!nw) continue;
+      const baseW = share(baseRem, baseLeft, nw, false);
+      const baseDone = total - baseRem;                 // quanto o ritmo-base já teria feito
+      const atrasadoW = doneBefore < baseDone - 1e-9;
+      const needW = share(total - doneBefore, remDays, nw, atrasadoW);
+      const W = compensarExcedente ? needW : Math.max(baseW, needW);
+      out.week[w.n] = { meta: W, base: baseW };
+
+      // metas-base dos dias da semana (sem atraso), para saber o que é "compensação"
+      const baseDay = {};
+      { let r = baseW, left = nw; for (const d of w.days) if (d.working) { const a = Math.round(r / left); baseDay[d.date] = a; r -= a; left--; } }
+
+      let doneWeek = 0, remW = nw, cumBase = 0;
+      for (const d of w.days) {
+        const actual = num(realized[d.date]);
+        if (!d.working) { if (actual != null) doneWeek += actual; continue; }
+        const baseD = baseDay[d.date];
+        const atrasadoD = doneWeek < cumBase - 1e-9;
+        const needD = share(W - doneWeek, remW, 1, atrasadoD);
+        const D = compensarExcedente ? needD : Math.max(baseD, needD);
+        out.day[d.date] = { meta: D, base: baseD };
+        doneWeek += actual != null ? actual : (d.date < today ? 0 : D);
+        cumBase += baseD;
+        remW--;
+      }
+      doneBefore += doneWeek;
+      remDays -= nw;
+      baseRem -= baseW; baseLeft -= nw;
+    }
+    return out;
+  }
+
   const sum = (vals) => {
     let t = null;
     for (const v of vals) if (v != null) t = (t || 0) + v;
@@ -227,7 +298,8 @@
   };
 
   function toneVolume(realizado, meta) {
-    if (meta == null || realizado == null || meta <= 0) return null;
+    if (meta === 0) return realizado > 0 ? 'good' : null; // dia sem meta que ainda assim produziu
+    if (meta == null || realizado == null || meta < 0) return null;
     const r = realizado / meta;
     return r >= 1 - EPS ? 'good' : r >= 0.7 ? 'warn' : 'bad';
   }
@@ -261,7 +333,7 @@
       for (const [date, v] of Object.entries(days)) if (v && num(v[k]) != null) realizedBy[k][date] = num(v[k]);
     }
     const plan = {};
-    for (const k of VOLUME) plan[k] = distribute(targets[k], weeks, realizedBy[k], today, compensar);
+    for (const k of VOLUME) plan[k] = distribute(targets[k], weeks, realizedBy[k], today, compensar, k !== 'investimento');
 
     // Monta uma "linha" (por métrica) de um período: meta, base, realizado, tom
     const buildRows = (dates, metaOf, baseOf, closedCount, workingCount) => {

@@ -35,7 +35,7 @@ async function api(path, opts = {}) {
 }
 
 // ---------- estado ----------
-const state = { clients: [], client: null, period: null, view: 'periodo', chartMetric: 'roas', goalMonth: null, saveChain: Promise.resolve() };
+const state = { clients: [], client: null, period: null, view: 'periodo', chartMetric: 'roas', goalMonth: null, gcKey: 'vendas', gcMode: 'dia', saveChain: Promise.resolve() };
 
 // ---------- roteamento: #/<cliente>/<aba> ----------
 function parseRoute() {
@@ -369,7 +369,7 @@ function goalMonthOptions(c) {
 }
 
 const ROW_BY_KEY = Object.fromEntries(Goals.ROWS.map((r) => [r.key, r]));
-const fval = (row, v) => (v == null ? '—' : row.fmt === 'brl' ? fmt.brl(v) : fmt.dec(v));
+const fval = (row, v) => (v == null ? '—' : row.fmt === 'brl' ? fmt.brl(v) : row.fmt === 'int' ? fmt.int(v) : fmt.dec(v));
 
 // Textos de cada "slot" (trechos que mudam quando o realizado muda) e o tom de cada célula de dia
 function goalSlots(res) {
@@ -396,6 +396,32 @@ function goalSlots(res) {
     ? `<div class="notice warn"><b>${res.semLancamento.length} dia(s) útil(eis) sem lançamento:</b> ${res.semLancamento.map(shortDate).join(', ')}.
        Eles contam como zero e já empurram a meta dos próximos dias. Lance o realizado (pode ser 0) para a conta ficar certa.</div>` : '';
   return { html, tone };
+}
+
+// Infográfico: uma métrica por vez, por dia útil (barras) ou acumulada (linhas)
+function chartPanelHtml(res, plan) {
+  if (!res.rowDefs.some((r) => r.key === state.gcKey)) state.gcKey = 'vendas';
+  const opts = res.rowDefs.map((r) => `<option value="${r.key}" ${r.key === state.gcKey ? 'selected' : ''}>${esc(r.label)}</option>`).join('');
+  const pressed = (m) => (state.gcMode === m ? 'true' : 'false');
+  return `<section class="panel gc-panel" aria-label="Infográfico por dia">
+      <div class="gc-head">
+        <label class="gc-pick">Métrica <select id="gc-metric">${opts}</select></label>
+        <div class="seg" role="group" aria-label="Tipo de gráfico">
+          <button type="button" data-gc-mode="dia" aria-pressed="${pressed('dia')}">Dia a dia</button>
+          <button type="button" data-gc-mode="acum" aria-pressed="${pressed('acum')}">Acumulado</button>
+        </div>
+      </div>
+      <div id="gc-box">${GoalChart.build({ res, plan, key: state.gcKey, mode: state.gcMode, fmtVal: fval })}</div>
+    </section>`;
+}
+
+function refreshChart(month) {
+  const box = document.getElementById('gc-box');
+  const plan = goalPlan(state.client, month);
+  if (!box || !plan) return;
+  const res = Goals.compute(month, plan);
+  box.innerHTML = GoalChart.build({ res, plan, key: state.gcKey, mode: state.gcMode, fmtVal: fval });
+  document.querySelectorAll('[data-gc-mode]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.gcMode === state.gcMode ? 'true' : 'false'));
 }
 
 function applySlots(slots) {
@@ -456,7 +482,7 @@ function renderGoals() {
       const cells = w.days.map((d) => {
         if (!d.working) return '<td class="offcell">—</td>';
         const real = row.input
-          ? `<input class="dayin" type="number" min="0" step="any" inputmode="decimal" aria-label="${esc(row.label)} realizado em ${esc(shortDate(d.date))}"
+          ? `<input class="dayin" type="number" min="0" step="${row.integer ? 1 : 'any'}" inputmode="${row.integer ? 'numeric' : 'decimal'}" aria-label="${esc(row.label)} realizado em ${esc(shortDate(d.date))}"
               data-date="${d.date}" data-key="${row.key}" value="${esc(((plan.days || {})[d.date] || {})[row.key] ?? '')}">`
           : `<div class="calc">${slot(`d:${d.date}:${row.key}:real`)}</div>`;
         return `<td class="daycell" data-tone-of="d:${d.date}:${row.key}"><div class="dmeta">${slot(`d:${d.date}:${row.key}:meta`)}</div>${real}</td>`;
@@ -472,7 +498,10 @@ function renderGoals() {
     <div id="goal-alert"><span data-slot="alert">${slots.html.alert}</span></div>
     ${res.hasTargets ? '' : '<div class="notice warn">A meta do mês está vazia. Use “Editar meta do mês” para preencher.</div>'}
     <h2 class="section">Mensal · ${esc(monthLabel(month))} <span class="muted">(${res.workingDays} dias úteis)</span></h2>
-    <div class="grid">${monthCards}</div>
+    <div class="mensal">
+      <div class="grid grid-sm">${monthCards}</div>
+      ${chartPanelHtml(res, plan)}
+    </div>
     ${weekHtml}
     <p class="hint">Digite só o <b>realizado</b> de cada dia; as metas se ajustam sozinhas. Em cada célula, a linha de cima é a meta e a de baixo é o realizado.
     <span class="up">▲</span> = meta acima da base porque o período anterior ficou abaixo. Custo por lead é um teto (meta fixa), calculado como investimento ÷ leads.
@@ -485,6 +514,7 @@ function renderGoals() {
   const tab = $('#tab');
   tab.onchange = (e) => {
     const el = e.target;
+    if (el.id === 'gc-metric') { state.gcKey = el.value; refreshChart(month); return; }
     if (!el.matches || !el.matches('input.dayin')) return;
     saveGoalDay(month, el.dataset.date, el.dataset.key, el.value);
   };
@@ -503,6 +533,8 @@ function renderGoals() {
     next.focus(); next.select();
   };
   tab.onclick = async (e) => {
+    const mb = e.target.closest && e.target.closest('[data-gc-mode]');
+    if (mb) { state.gcMode = mb.dataset.gcMode; refreshChart(month); return; }
     const btn = e.target.closest && e.target.closest('[data-toggle-off]');
     if (!btn) return;
     const date = btn.dataset.toggleOff;
@@ -522,10 +554,12 @@ function saveGoalDay(month, date, key, raw) {
   const plan = goalPlan(c, month);
   const value = raw === '' ? null : Number(raw);
   if (value != null && (!Number.isFinite(value) || value < 0)) { alert('Informe um número maior ou igual a zero.'); renderGoals(); return; }
+  if (value != null && ROW_BY_KEY[key] && ROW_BY_KEY[key].integer && !Number.isInteger(value)) { alert('Use um número inteiro: não existe meio lead ou meia venda.'); renderGoals(); return; }
   plan.days = plan.days || {};
   plan.days[date] = { ...plan.days[date], [key]: value };
   if (Object.values(plan.days[date]).every((v) => v == null)) delete plan.days[date];
   applySlots(goalSlots(Goals.compute(month, plan)));
+  refreshChart(month);
   document.getElementById('goal-alert').innerHTML = `<span data-slot="alert">${goalSlots(Goals.compute(month, plan)).html.alert}</span>`;
   state.saveChain = state.saveChain
     .then(() => api(`/clients/${encodeURIComponent(c.id)}/goals/${month}/days/${date}`, { method: 'PUT', body: { [key]: raw } }))
@@ -557,7 +591,7 @@ function openGoalDialog(month) {
       <label class="stage-mode"><span class="sr-only">Como definir ${esc(stageLabel(k))}</span>
         <select name="modo-${k}" data-stage="${k}">${Goals.MODES[k].map((m) => `<option value="${m}" ${it.modo === m ? 'selected' : ''}>${esc(modeText(k, m))}</option>`).join('')}</select></label>
       <label class="stage-val"><span class="sr-only">Valor de ${esc(stageLabel(k))}</span>
-        <span class="inwrap"><input type="number" min="0" step="any" inputmode="decimal" name="val-${k}" value="${esc(it.valor ?? '')}"><span class="unit" data-unit="${k}">${esc(modeUnit(it.modo))}</span></span></label>
+        <span class="inwrap"><input type="number" min="0" step="${it.modo === 'numero' ? 1 : 'any'}" inputmode="decimal" name="val-${k}" value="${esc(it.valor ?? '')}"><span class="unit" data-unit="${k}">${esc(modeUnit(it.modo))}</span></span></label>
       <div class="stage-eq hint" data-eq="${k}"></div>
     </div>`;
   };
@@ -593,8 +627,9 @@ function openGoalDialog(month) {
     for (const k of Goals.STAGES) {
       const i = info[k];
       $(`[data-unit="${k}"]`).textContent = modeUnit(i.modo);
+      form.elements['val-' + k].step = i.modo === 'numero' ? '1' : 'any'; // número exato de pessoas: inteiro
       const parts = [];
-      if (i.total != null) parts.push(`${fmt.dec(i.total)} no mês`);
+      if (i.total != null) parts.push(`${fmt.int(i.total)} no mês`);
       if (i.modo !== 'custo' && i.custo != null) parts.push(`${fmt.brl(i.custo)} por ${STAGE_TEXT[k].unit}`);
       if (i.modo !== 'taxa' && i.taxa != null) parts.push(`${fmt.dec(i.taxa)}% ${STAGE_TEXT[k].base}`);
       const needBase = i.modo === 'taxa' && i.total == null && meta.itens[k].valor != null;

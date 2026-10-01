@@ -110,8 +110,20 @@ function cleanGoalMeta(meta) {
     if (!GOAL_MODES[k]) continue;
     if (!it || !GOAL_MODES[k].includes(it.modo)) throw Object.assign(new Error(`Modo inválido para "${k}" (use ${GOAL_MODES[k].join(', ')})`), { status: 400 });
     const valor = cleanGoalNumbers({ valor: it.valor }, ['valor']).valor;
+    if (it.modo === 'numero' && valor != null && !Number.isInteger(valor)) throw Object.assign(new Error(`Use um número inteiro em "${k}" (pessoas não vêm quebradas)`), { status: 400 });
     if (it.modo === 'taxa' && valor != null && valor > 100) throw Object.assign(new Error(`A porcentagem de "${k}" não pode passar de 100`), { status: 400 });
     out.itens[k] = { modo: it.modo, valor };
+  }
+  return out;
+}
+
+/** Realizado do dia: dinheiro com centavos; pessoas (leads, cotações, vendas...) só números inteiros. */
+function cleanGoalDay(input) {
+  const out = cleanGoalNumbers(input, GOAL_DAY_FIELDS);
+  for (const [k, v] of Object.entries(out)) {
+    if (k !== 'investimento' && v != null && !Number.isInteger(v)) {
+      throw Object.assign(new Error(`Use um número inteiro em "${k}" (não existe meio lead ou meia venda)`), { status: 400 });
+    }
   }
   return out;
 }
@@ -251,7 +263,7 @@ async function handleApi(req, res, url) {
       if (!plan) return send(res, 404, { error: 'Defina a meta do mês antes de lançar o realizado' });
       plan.days = plan.days || {};
       if (req.method === 'PUT') {
-        const merged = { ...plan.days[date], ...cleanGoalNumbers(await readBody(req), GOAL_DAY_FIELDS) };
+        const merged = { ...plan.days[date], ...cleanGoalDay(await readBody(req)) };
         if (Object.values(merged).every((v) => v == null)) delete plan.days[date]; else plan.days[date] = merged;
         await saveDb(db);
         return send(res, 200, client);
@@ -336,4 +348,4 @@ if (require.main === module) {
   server.listen(PORT, () => console.log(`Gestão de Clientes rodando em http://localhost:${PORT}`));
 }
 
-module.exports = { server, handler, cleanMonth, cleanProject, cleanGoalPlan, cleanGoalNumbers, cleanGoalMeta };
+module.exports = { server, handler, cleanMonth, cleanProject, cleanGoalPlan, cleanGoalNumbers, cleanGoalMeta, cleanGoalDay };

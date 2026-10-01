@@ -168,3 +168,36 @@ table.goal-table td[data-tone] input { background: transparent; }
   .stage-name { grid-column: 1 / -1; }
   .stage-eq { grid-column: 1 / -1; }
 }
+
+/* Meta + infográfico lado a lado */
+.mensal { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 16px; align-items: start; }
+.mensal .grid-sm { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+@media (max-width: 1050px) { .mensal { grid-template-columns: minmax(0, 1fr); } }
+.gc-panel { min-width: 0; }
+.gc-head { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-end; justify-content: space-between; margin-bottom: 8px; }
+.gc-pick { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); font-weight: 600; min-width: 0; }
+.gc-pick select { max-width: 100%; }
+.gc-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.gc-key { display: inline-flex; align-items: center; gap: 6px; }
+.gc-unit { margin-left: auto; }
+.gc-sw { display: inline-block; width: 14px; height: 10px; border-radius: 2px; }
+.gc-sw-bar { background: var(--accent); }
+.gc-sw-real { height: 3px; background: var(--accent); }
+.gc-sw-meta { height: 2px; background: var(--text); width: 18px; }
+.gc-sw-dash { height: 0; width: 18px; border-top: 2px dashed var(--muted); border-radius: 0; }
+.gc-svg { display: block; max-width: 100%; height: auto; overflow: visible; }
+.gc-grid { stroke: var(--border); stroke-width: 1; }
+.gc-axis, .gc-wd { fill: var(--muted); font-size: 11px; }
+.gc-day { fill: var(--text); font-size: 12px; font-weight: 600; }
+.gc-today { fill: var(--accent); font-weight: 800; }
+.gc-bar { fill: var(--accent); }
+.gc-meta { stroke: var(--text); stroke-width: 2.5; stroke-linecap: round; }
+.gc-val { fill: var(--text); font-size: 11px; font-weight: 700; }
+.gc-hit { fill: transparent; }
+.gc-hit:hover { fill: rgba(255,255,255,.05); }
+.gc-line-real { fill: none; stroke: var(--accent); stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; }
+.gc-line-meta { fill: none; stroke: var(--muted); stroke-width: 2; stroke-dasharray: 5 4; }
+.gc-dot { fill: var(--accent); stroke: var(--surface); stroke-width: 1.5; }
+.gc-caption { margin-top: 6px; font-size: 13px; color: var(--muted); }
+.gc-caption b { color: var(--text); }
+.gc-empty { color: var(--muted); padding: 24px; text-align: center; }
