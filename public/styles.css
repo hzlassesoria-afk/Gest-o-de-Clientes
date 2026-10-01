@@ -102,3 +102,21 @@ dl.kv dt { color: var(--muted); }
   dl.kv { grid-template-columns: 1fr; }
   dl.kv dt { border-bottom: 0; padding-bottom: 0; }
 }
+
+/* Análise mês a mês */
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.seg button { font: inherit; font-weight: 600; border: 0; background: transparent; color: var(--muted); padding: 8px 14px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.delta { font-size: 12px; font-weight: 600; margin-top: 4px; }
+.delta.good { color: var(--good); }
+.delta.bad { color: var(--bad); }
+.delta.flat { color: var(--muted); }
+.delta .vs { color: var(--muted); font-weight: 400; }
+table.mm td, table.mm th { vertical-align: top; }
+table.mm td:first-child, table.mm th:first-child { position: sticky; left: 0; background: var(--surface); text-align: left; min-width: 210px; z-index: 1; }
+table.mm tr.grp td { background: var(--bg); color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; text-align: left; }
+table.mm .delta { margin-top: 1px; font-size: 11px; }
+table.mm .na { color: var(--muted); }
+.chart text.val { fill: var(--text); font-size: 12px; font-weight: 600; }

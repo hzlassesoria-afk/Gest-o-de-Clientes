@@ -167,6 +167,7 @@
       dinheiroColetado: s.dinheiroColetado,
     };
 
+    result.aderenciaReunioesPct = result.aderenciaReunioes == null ? null : result.aderenciaReunioes * 100;
     result.nivelAnsiedade = anxietyLevel(result.contatosEspontaneosSemana);
 
     // Funil: cada etapa como % da etapa anterior preenchida
@@ -208,5 +209,56 @@
     return Object.keys(client.months || {}).sort().map((k) => ({ month: k, ...compute(client, [k], today) }));
   }
 
-  return { compute, series, sumMonths, SUM_FIELDS, daysBetween, monthsBetween, anxietyLevel, healthBand, computeHealth };
+  /*
+   * Indicadores da análise mês a mês.
+   *  good: 'up' (subir é bom) | 'down' (cair é bom) | null (neutro, ex.: investimento)
+   *  kind: 'rel' = variação em % | 'abs' = diferença absoluta (para métricas que já são %, notas ou escores)
+   */
+  const INDICATORS = [
+    { group: 'Resultado do cliente', items: [
+      { key: 'investimento', label: 'Investimento no Meta', fmt: 'brl', good: null, kind: 'rel' },
+      { key: 'leads', label: 'Leads', fmt: 'int', good: 'up', kind: 'rel' },
+      { key: 'cpl', label: 'Custo por lead', fmt: 'brl', good: 'down', kind: 'rel' },
+      { key: 'leadsQualificados', label: 'Leads qualificados', fmt: 'int', good: 'up', kind: 'rel' },
+      { key: 'cplQualificado', label: 'Custo por lead qualificado', fmt: 'brl', good: 'down', kind: 'rel' },
+      { key: 'leadsResponderam', label: 'Responderam o 1º contato', fmt: 'int', good: 'up', kind: 'rel' },
+      { key: 'cotacoes', label: 'Cotações enviadas', fmt: 'int', good: 'up', kind: 'rel' },
+      { key: 'pararamResponder', label: 'Pararam de responder (pós follow-up)', fmt: 'int', good: 'down', kind: 'rel' },
+      { key: 'negociacoes', label: 'Em negociação', fmt: 'int', good: 'up', kind: 'rel' },
+      { key: 'vendas', label: 'Vendas', fmt: 'int', good: 'up', kind: 'rel' },
+      { key: 'receita', label: 'Receita gerada em vendas', fmt: 'brl', good: 'up', kind: 'rel' },
+      { key: 'ticketMedio', label: 'Ticket médio', fmt: 'brl', good: 'up', kind: 'rel' },
+      { key: 'roas', label: 'ROAS', fmt: 'x', good: 'up', kind: 'rel' },
+      { key: 'cac', label: 'CAC', fmt: 'brl', good: 'down', kind: 'rel' },
+    ] },
+    { group: 'Gestão', items: [
+      { key: 'mrr', label: 'MRR', fmt: 'brl', good: 'up', kind: 'rel' },
+      { key: 'taxaInadimplencia', label: 'Taxa de inadimplência', fmt: 'pct', good: 'down', kind: 'abs', unit: 'p.p.' },
+      { key: 'nps', label: 'NPS', fmt: 'nps', good: 'up', kind: 'abs', unit: 'pts' },
+      { key: 'healthScore', label: 'Health Score', fmt: 'int', good: 'up', kind: 'abs', unit: 'pts' },
+      { key: 'indiceReclamacao', label: 'Índice de reclamação', fmt: 'pct', good: 'down', kind: 'abs', unit: 'p.p.' },
+      { key: 'aderenciaReunioesPct', label: 'Aderência às reuniões', fmt: 'pct', good: 'up', kind: 'abs', unit: 'p.p.' },
+      { key: 'contatosEspontaneosSemana', label: 'Contatos espontâneos / semana', fmt: 'dec', good: 'down', kind: 'abs', unit: '' },
+      { key: 'dinheiroColetado', label: 'Dinheiro coletado', fmt: 'brl', good: 'up', kind: 'rel' },
+    ] },
+  ];
+  const INDICATOR_BY_KEY = Object.fromEntries(INDICATORS.flatMap((g) => g.items).map((d) => [d.key, d]));
+
+  /**
+   * Variação entre dois valores. null quando não dá para comparar.
+   * tone: 'good' | 'bad' | 'flat' (flat também para indicadores neutros).
+   */
+  function change(curr, prev, def) {
+    if (curr == null || prev == null || !def) return null;
+    let value;
+    if (def.kind === 'abs') value = curr - prev;
+    else if (prev === 0) return null; // variação % sobre zero não faz sentido
+    else value = ((curr - prev) / Math.abs(prev)) * 100;
+    if (Math.abs(value) < 0.05) return { value: 0, dir: 'flat', tone: 'flat', kind: def.kind, unit: def.unit };
+    const dir = value > 0 ? 'up' : 'down';
+    const tone = def.good == null ? 'flat' : dir === def.good ? 'good' : 'bad';
+    return { value, dir, tone, kind: def.kind, unit: def.unit };
+  }
+
+  return { compute, series, sumMonths, INDICATORS, INDICATOR_BY_KEY, change, SUM_FIELDS, daysBetween, monthsBetween, anxietyLevel, healthBand, computeHealth };
 });

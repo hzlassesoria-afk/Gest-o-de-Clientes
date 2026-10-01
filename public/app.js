@@ -35,7 +35,7 @@ async function api(path, opts = {}) {
 }
 
 // ---------- estado ----------
-const state = { clients: [], client: null, period: null };
+const state = { clients: [], client: null, period: null, view: 'periodo', chartMetric: 'roas' };
 
 // ---------- roteamento: #/<cliente>/<aba> ----------
 function parseRoute() {
@@ -88,8 +88,14 @@ function renderMetrics() {
     const withData = Object.keys(c.months).sort().reverse()[0];
     state.period = withData || currentMonth();
   }
+  if (state.view === 'mes') return renderMonthly();
   const keys = state.period === 'all' ? Object.keys(c.months).sort() : [state.period];
   const m = Metrics.compute(c, keys);
+
+  // Comparação com o mês anterior (só quando um único mês está selecionado)
+  const prevKey = state.period === 'all' ? null : Object.keys(c.months).sort().filter((k) => k < state.period).pop();
+  const mp = prevKey ? Metrics.compute(c, [prevKey]) : null;
+  const dlt = (key) => deltaHtml(Metrics.change(m[key], mp && mp[key], Metrics.INDICATOR_BY_KEY[key]), prevKey);
   const hasData = keys.some((k) => c.months[k] && Object.values(c.months[k]).some((v) => v != null && v !== ''));
 
   const card = (label, value, f, note, cls = '') => {
@@ -105,34 +111,24 @@ function renderMetrics() {
   const mondayHint = c.project.contractDate || c.project.startDate ? '' : ' Preencha as datas em “Dados do projeto”.';
 
   $('#tab').innerHTML = `
-    <div class="toolbar">
-      <label>Período
-        <select id="period">
-          <option value="all" ${state.period === 'all' ? 'selected' : ''}>Acumulado</option>
-          ${opts.map((k) => `<option value="${k}" ${state.period === k ? 'selected' : ''}>${monthLabel(k)}</option>`).join('')}
-        </select>
-      </label>
-      <span class="spacer"></span>
-      <button class="btn btn-ghost" id="edit-project">Dados do projeto</button>
-      <button class="btn" id="edit-month">Registrar dados do mês</button>
-    </div>
+    ${toolbarHtml(c, true)}
     ${demoBanner(c, hasData, mondayHint)}
 
     <h2 class="section">Métricas de resultado do cliente</h2>
     <div class="grid">
-      ${card('Investimento no Meta', m.investimento, 'brl')}
-      ${card('Leads', m.leads, 'int')}
-      ${card('Custo por lead (CPL)', m.cpl, 'brl')}
-      ${card('Leads qualificados', m.leadsQualificados, 'int', ofLeads(m.leadsQualificados))}
-      ${card('Custo por lead qualificado', m.cplQualificado, 'brl')}
-      ${card('Responderam o 1º contato', m.leadsResponderam, 'int', ofLeads(m.leadsResponderam))}
-      ${card('Cotações enviadas', m.cotacoes, 'int', ofLeads(m.cotacoes))}
-      ${card('Pararam de responder (pós 7 dias de follow-up)', m.pararamResponder, 'int')}
-      ${card('Em negociação', m.negociacoes, 'int')}
-      ${card('Vendas', m.vendas, 'int', ofLeads(m.vendas))}
-      ${card('Ticket médio', m.ticketMedio, 'brl', m.receita != null ? `Receita gerada: ${esc(fmt.brl(m.receita))}` : '')}
-      ${card('ROAS', m.roas, 'x', 'Receita ÷ investimento no Meta')}
-      ${card('CAC', m.cac, 'brl', c.project.cacIncludesFee === false ? 'Investimento ÷ vendas' : '(Investimento + mensalidade) ÷ vendas')}
+      ${card('Investimento no Meta', m.investimento, 'brl', dlt('investimento'))}
+      ${card('Leads', m.leads, 'int', dlt('leads'))}
+      ${card('Custo por lead (CPL)', m.cpl, 'brl', dlt('cpl'))}
+      ${card('Leads qualificados', m.leadsQualificados, 'int', ofLeads(m.leadsQualificados) + dlt('leadsQualificados'))}
+      ${card('Custo por lead qualificado', m.cplQualificado, 'brl', dlt('cplQualificado'))}
+      ${card('Responderam o 1º contato', m.leadsResponderam, 'int', ofLeads(m.leadsResponderam) + dlt('leadsResponderam'))}
+      ${card('Cotações enviadas', m.cotacoes, 'int', ofLeads(m.cotacoes) + dlt('cotacoes'))}
+      ${card('Pararam de responder (pós 7 dias de follow-up)', m.pararamResponder, 'int', dlt('pararamResponder'))}
+      ${card('Em negociação', m.negociacoes, 'int', dlt('negociacoes'))}
+      ${card('Vendas', m.vendas, 'int', ofLeads(m.vendas) + dlt('vendas'))}
+      ${card('Ticket médio', m.ticketMedio, 'brl', (m.receita != null ? `Receita gerada: ${esc(fmt.brl(m.receita))}` : '') + dlt('ticketMedio'))}
+      ${card('ROAS', m.roas, 'x', 'Receita ÷ investimento no Meta' + dlt('roas'))}
+      ${card('CAC', m.cac, 'brl', (c.project.cacIncludesFee === false ? 'Investimento ÷ vendas' : '(Investimento + mensalidade) ÷ vendas') + dlt('cac'))}
     </div>
 
     <h2 class="section">Funil comercial</h2>
@@ -141,38 +137,78 @@ function renderMetrics() {
     <h2 class="section">Métricas de gestão</h2>
     <div class="grid">
       ${card('Tempo de projeto', m.tempoProjetoMeses, 'meses', c.project.startDate ? `Desde ${esc(c.project.startDate.split('-').reverse().join('/'))}` : 'Informe o início em “Dados do projeto”')}
-      ${card('Taxa de inadimplência', m.taxaInadimplencia, 'pct', 'Inadimplente ÷ faturado')}
-      ${card('MRR', m.mrr, 'brl')}
+      ${card('Taxa de inadimplência', m.taxaInadimplencia, 'pct', 'Inadimplente ÷ faturado' + dlt('taxaInadimplencia'))}
+      ${card('MRR', m.mrr, 'brl', dlt('mrr'))}
       ${card('Time to Value: contrato → campanhas no ar', m.timeToValueCampanhaDias, 'dias')}
       ${card('Time to Value: campanhas → 1ª venda', m.timeToValuePrimeiraVendaDias, 'dias',
         m.timeToValueContratoPrimeiraVendaDias != null ? `Contrato → 1ª venda: ${esc(fmt.dias(m.timeToValueContratoPrimeiraVendaDias))}` : '')}
-      ${card('NPS', m.nps, 'nps', state.period === 'all' ? 'Média dos meses informados' : 'No mês')}
+      ${card('NPS', m.nps, 'nps', (state.period === 'all' ? 'Média dos meses informados' : 'No mês') + dlt('nps'))}
       <div class="card"><div class="label">Health Score</div>
         <div class="value ${m.healthScore == null ? 'empty' : ''}">${m.healthScore == null ? '—' : esc(m.healthScore)}
           ${m.healthBand ? `<span class="pill ${bandCls}">${esc(m.healthBand)}</span>` : ''}</div>
-        <div class="note">${healthNote(m)}</div></div>
-      ${card('Índice de reclamação', m.indiceReclamacao, 'pct', 'Reclamações ÷ contatos do cliente')}
+        <div class="note">${healthNote(m)}${dlt('healthScore')}</div></div>
+      ${card('Índice de reclamação', m.indiceReclamacao, 'pct', 'Reclamações ÷ contatos do cliente' + dlt('indiceReclamacao'))}
       <div class="card"><div class="label">Reuniões de alinhamento</div>
         <div class="value ${m.reunioesRealizadas == null ? 'empty' : ''}">${m.reunioesRealizadas == null ? '—' : esc(fmt.int(m.reunioesRealizadas)) + (m.reunioesPlanejadas != null ? ` / ${esc(fmt.int(m.reunioesPlanejadas))}` : '')}</div>
-        <div class="note">${m.aderenciaReunioes != null ? `Aderência: ${esc(fmt.pct(m.aderenciaReunioes * 100))}` : 'Realizadas / planejadas'}</div></div>
+        <div class="note">${m.aderenciaReunioes != null ? `Aderência: ${esc(fmt.pct(m.aderenciaReunioes * 100))}` : 'Realizadas / planejadas'}${dlt('aderenciaReunioesPct')}</div></div>
       <div class="card"><div class="label">Alinhamento de expectativa (ansiedade)</div>
         <div class="value ${m.nivelAnsiedade == null ? 'empty' : ''}">${m.nivelAnsiedade == null ? '—' : `<span class="pill ${ansCls}">${esc(m.nivelAnsiedade)}</span>`}</div>
-        <div class="note">${m.contatosEspontaneosSemana != null ? `${esc(fmt.dec(m.contatosEspontaneosSemana))} contatos espontâneos/semana` : 'Contatos fora do horário ou cobrando venda'}</div></div>
-      ${card('Dinheiro coletado', m.dinheiroColetado, 'brl')}
+        <div class="note">${m.contatosEspontaneosSemana != null ? `${esc(fmt.dec(m.contatosEspontaneosSemana))} contatos espontâneos/semana` : 'Contatos fora do horário ou cobrando venda'}${dlt('contatosEspontaneosSemana')}</div></div>
+      ${card('Dinheiro coletado', m.dinheiroColetado, 'brl', dlt('dinheiroColetado'))}
     </div>
 
     <h2 class="section">Evolução mensal</h2>
     ${trendHtml(c)}
   `;
 
-  $('#period').onchange = (e) => { state.period = e.target.value; renderMetrics(); };
-  $('#edit-month').onclick = () => openMonthDialog(state.period === 'all' ? currentMonth() : state.period);
+  bindToolbar();
+  bindDemo();
+}
+
+function toolbarHtml(c, showPeriod) {
+  const pressed = (v) => (state.view === v ? 'true' : 'false');
+  return `<div class="toolbar">
+      <div class="seg" role="group" aria-label="Tipo de análise">
+        <button type="button" data-view="periodo" aria-pressed="${pressed('periodo')}">Período</button>
+        <button type="button" data-view="mes" aria-pressed="${pressed('mes')}">Mês a mês</button>
+      </div>
+      ${showPeriod ? `<label>Mês
+        <select id="period">
+          <option value="all" ${state.period === 'all' ? 'selected' : ''}>Acumulado</option>
+          ${monthOptions(c).map((k) => `<option value="${k}" ${state.period === k ? 'selected' : ''}>${monthLabel(k)}</option>`).join('')}
+        </select>
+      </label>` : ''}
+      <span class="spacer"></span>
+      <button class="btn btn-ghost" id="edit-project">Dados do projeto</button>
+      <button class="btn" id="edit-month">Registrar dados do mês</button>
+    </div>`;
+}
+
+function bindToolbar() {
+  document.querySelectorAll('.seg button').forEach((b) => {
+    b.onclick = () => { state.view = b.dataset.view; renderMetrics(); };
+  });
+  const period = $('#period');
+  if (period) period.onchange = (e) => { state.period = e.target.value; renderMetrics(); };
+  $('#edit-month').onclick = () => openMonthDialog(state.period && state.period !== 'all' ? state.period : currentMonth());
   $('#edit-project').onclick = openProjectDialog;
+}
+
+function bindDemo() {
   const loadBtn = $('#load-demo'), clearBtn = $('#clear-demo');
   if (loadBtn) loadBtn.onclick = () => demoAction('POST', loadBtn);
   if (clearBtn) clearBtn.onclick = () => {
     if (confirm('Remover os meses simulados? Meses que você editou ou lançou continuam.')) demoAction('DELETE', clearBtn);
   };
+}
+
+function deltaHtml(ch, prevKey) {
+  if (!ch || !prevKey) return '';
+  const arrow = ch.dir === 'up' ? '▲' : ch.dir === 'down' ? '▼' : '▬';
+  const abs = Math.abs(ch.value);
+  const text = ch.dir === 'flat' ? 'igual'
+    : ch.kind === 'rel' ? `${fmt.dec(abs)}%` : `${fmt.dec(abs)}${ch.unit ? ' ' + ch.unit : ''}`;
+  return `<div class="delta ${ch.tone}"><span>${arrow} ${esc(text)}</span> <span class="vs">vs ${esc(monthLabel(prevKey))}</span></div>`;
 }
 
 function demoBanner(c, hasData, mondayHint) {
@@ -196,6 +232,68 @@ async function demoAction(method, btn) {
     state.period = null;
     await render();
   } catch (err) { btn.disabled = false; alert(err.message); }
+}
+
+function renderMonthly() {
+  const c = state.client;
+  const rows = Metrics.series(c);
+  const flat = Metrics.INDICATORS.flatMap((g) => g.items);
+  if (!flat.some((d) => d.key === state.chartMetric)) state.chartMetric = 'roas';
+
+  const head = rows.map((r) => `<th>${esc(monthLabel(r.month))}${c.months[r.month]._demo ? '<br><span class="pill warn">simulado</span>' : ''}</th>`).join('');
+  const body = Metrics.INDICATORS.map((g) => `
+    <tr class="grp"><td colspan="${rows.length + 1}">${esc(g.group)}</td></tr>
+    ${g.items.map((d) => `<tr><td>${esc(d.label)}</td>${rows.map((r, i) => {
+      const v = r[d.key];
+      const ch = i ? Metrics.change(v, rows[i - 1][d.key], d) : null;
+      return `<td>${v == null ? '<span class="na">—</span>' : esc(fmt[d.fmt](v))}${ch ? deltaHtml(ch, rows[i - 1].month).replace(/ <span class="vs">.*<\/span>/, '') : ''}</td>`;
+    }).join('')}</tr>`).join('')}`).join('');
+
+  $('#tab').innerHTML = `
+    ${toolbarHtml(c, false)}
+    ${demoBanner(c, true, '')}
+    ${rows.length ? `
+    <div class="panel" style="margin-bottom:16px">
+      <label>Gráfico da métrica
+        <select id="chart-metric">${Metrics.INDICATORS.map((g) => `<optgroup label="${esc(g.group)}">${g.items.map((d) => `<option value="${d.key}" ${d.key === state.chartMetric ? 'selected' : ''}>${esc(d.label)}</option>`).join('')}</optgroup>`).join('')}</select>
+      </label>
+      <div id="metric-chart">${metricChartHtml(rows, Metrics.INDICATOR_BY_KEY[state.chartMetric])}</div>
+    </div>
+    <div class="panel scroll"><table class="data mm"><thead><tr><th>Indicador</th>${head}</tr></thead><tbody>${body}</tbody></table></div>
+    <div class="hint">A seta compara cada mês com o mês anterior com dados. Verde = melhorou, vermelho = piorou (custo menor é melhor); cinza = neutro (ex.: investimento).</div>`
+    : '<div class="panel empty-state">Lance os dados de pelo menos um mês para ver a análise mês a mês.</div>'}`;
+
+  bindToolbar();
+  bindDemo();
+  const sel = $('#chart-metric');
+  if (sel) sel.onchange = (e) => {
+    state.chartMetric = e.target.value;
+    $('#metric-chart').innerHTML = metricChartHtml(rows, Metrics.INDICATOR_BY_KEY[state.chartMetric]);
+  };
+}
+
+// Barras de uma métrica por mês, com o valor sobre cada barra (aceita valores negativos, ex.: NPS)
+function metricChartHtml(rows, def) {
+  const pts = rows.map((r) => ({ month: r.month, v: r[def.key] }));
+  const vals = pts.map((p) => p.v).filter((v) => v != null);
+  if (!vals.length) return '<div class="empty-state">Sem dados desta métrica.</div>';
+  const W = 720, H = 240, padL = 16, padR = 16, padT = 26, padB = 30;
+  const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
+  const span = hi - lo || 1;
+  const y = (v) => padT + (H - padT - padB) * (1 - (v - lo) / span);
+  const slot = (W - padL - padR) / pts.length;
+  const bw = Math.min(48, slot * 0.55);
+  const bars = pts.map((p, i) => {
+    const x = padL + slot * i + (slot - bw) / 2;
+    const label = `<text x="${x + bw / 2}" y="${H - 10}" text-anchor="middle">${esc(monthLabel(p.month))}</text>`;
+    if (p.v == null) return label + `<text x="${x + bw / 2}" y="${y(0) - 6}" text-anchor="middle">—</text>`;
+    const top = Math.min(y(p.v), y(0)), h = Math.max(Math.abs(y(p.v) - y(0)), 1);
+    const ly = p.v >= 0 ? top - 6 : top + h + 12;
+    return `<rect x="${x}" y="${top}" width="${bw}" height="${h}" rx="3" fill="var(--bar)"><title>${esc(monthLabel(p.month))}: ${esc(fmt[def.fmt](p.v))}</title></rect>
+      <text class="val" x="${x + bw / 2}" y="${ly}" text-anchor="middle">${esc(fmt[def.fmt](p.v))}</text>${label}`;
+  }).join('');
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="${esc(def.label)} por mês">
+    <line x1="${padL}" y1="${y(0)}" x2="${W - padR}" y2="${y(0)}" stroke="var(--border)"/>${bars}</svg>`;
 }
 
 function healthNote(m) {

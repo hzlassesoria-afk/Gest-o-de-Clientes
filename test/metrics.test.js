@@ -82,3 +82,31 @@ test('funil: % da etapa anterior pula etapas vazias', () => {
   assert.equal(vendas.pctOfLeads, 6 / 200);
   assert.equal(vendas.pctOfPrev, 6 / 200); // anteriores vazias => compara com leads
 });
+
+test('variação mês a mês: relativa, absoluta e direção boa/ruim', () => {
+  const D = Metrics.INDICATOR_BY_KEY;
+  let c = Metrics.change(120, 100, D.leads);
+  assert.equal(c.value, 20); assert.equal(c.tone, 'good'); assert.equal(c.dir, 'up');
+  c = Metrics.change(30, 25, D.cpl); // custo subiu = ruim
+  assert.equal(c.tone, 'bad');
+  c = Metrics.change(20, 25, D.cpl); // custo caiu = bom
+  assert.equal(c.tone, 'good'); assert.equal(c.dir, 'down');
+  c = Metrics.change(4500, 4000, D.investimento); // neutro
+  assert.equal(c.tone, 'flat'); assert.equal(c.dir, 'up');
+  c = Metrics.change(8, 10, D.taxaInadimplencia); // 10% -> 8%: -2 p.p., bom
+  assert.equal(c.value, -2); assert.equal(c.tone, 'good'); assert.equal(c.unit, 'p.p.');
+  c = Metrics.change(80, 70, D.nps);
+  assert.equal(c.value, 10); assert.equal(c.tone, 'good');
+  assert.equal(Metrics.change(5, 0, D.leads), null);           // % sobre zero
+  assert.equal(Metrics.change(0, 5, D.leads).value, -100);
+  assert.equal(Metrics.change(null, 5, D.leads), null);
+  assert.equal(Metrics.change(5, null, D.leads), null);
+  assert.equal(Metrics.change(7, 7, D.leads).tone, 'flat');
+  assert.equal(Metrics.change(3, 0, D.taxaInadimplencia).value, 3); // abs funciona com prev=0
+});
+
+test('toda chave dos indicadores existe no resultado de compute()', () => {
+  const m = Metrics.compute(client, ['2026-08'], '2026-10-01');
+  for (const g of Metrics.INDICATORS) for (const d of g.items) assert.ok(d.key in m, d.key);
+  assert.equal(m.aderenciaReunioesPct, 75);
+});
