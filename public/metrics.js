@@ -182,26 +182,23 @@
     return result;
   }
 
+  /**
+   * Funil comercial em 5 etapas. `conv` = conversão em relação à etapa imediatamente anterior
+   * (null se uma das duas não foi informada ou a anterior é 0). `pctOfLeads` = % sobre o topo.
+   */
   function buildFunnel(r) {
     const steps = [
-      ['Leads', r.leads],
-      ['Leads qualificados', r.leadsQualificados],
-      ['Responderam o 1º contato', r.leadsResponderam],
-      ['Cotações enviadas', r.cotacoes],
-      ['Em negociação', r.negociacoes],
-      ['Vendas', r.vendas],
+      ['leads', 'Leads', 'Leads gerados', r.leads],
+      ['leadsQualificados', 'Qualificados', 'Leads qualificados (MQL)', r.leadsQualificados],
+      ['cotacoes', 'Cotações', 'Cotações enviadas', r.cotacoes],
+      ['negociacoes', 'Negociação', 'Em negociação', r.negociacoes],
+      ['vendas', 'Vendas', 'Vendas fechadas', r.vendas],
     ];
-    const top = r.leads;
-    let prev = null;
-    return steps.map(([label, value]) => {
-      const out = {
-        label, value,
-        pctOfLeads: div(value, top),
-        pctOfPrev: prev == null ? null : div(value, prev),
-      };
-      if (value != null) prev = value;
-      return out;
-    });
+    return steps.map(([key, label, title, value], i) => ({
+      key, label, title, value,
+      conv: i === 0 ? null : (() => { const c = div(value, steps[i - 1][3]); return c == null ? null : c * 100; })(),
+      pctOfLeads: (() => { const c = div(value, r.leads); return c == null ? null : c * 100; })(),
+    }));
   }
 
   /** Série mensal para gráficos/tabela de evolução. */

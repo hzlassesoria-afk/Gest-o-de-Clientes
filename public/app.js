@@ -115,6 +115,7 @@ function renderMetrics() {
     ${demoBanner(c, hasData, mondayHint)}
 
     <h2 class="section">Métricas de resultado do cliente</h2>
+    <div class="results">
     <div class="grid">
       ${card('Investimento no Meta', m.investimento, 'brl', dlt('investimento'))}
       ${card('Leads', m.leads, 'int', dlt('leads'))}
@@ -130,9 +131,8 @@ function renderMetrics() {
       ${card('ROAS', m.roas, 'x', 'Receita ÷ investimento no Meta' + dlt('roas'))}
       ${card('CAC', m.cac, 'brl', (c.project.cacIncludesFee === false ? 'Investimento ÷ vendas' : '(Investimento + mensalidade) ÷ vendas') + dlt('cac'))}
     </div>
-
-    <h2 class="section">Funil comercial</h2>
-    <div class="panel">${funnelHtml(m)}</div>
+    <aside class="panel funnel-panel" aria-label="Funil comercial">${funnelHtml(m)}</aside>
+    </div>
 
     <h2 class="section">Métricas de gestão</h2>
     <div class="grid">
@@ -302,19 +302,57 @@ function healthNote(m) {
   return 'Calculado: ' + m.healthScoreAuto.parts.map((p) => esc(p.key)).join(', ');
 }
 
+// Funil em camadas. Largura ~ raiz da quantidade (com mínimo p/ caber o texto); cor = rampa ordinal de um tom (--f1..--f5).
 function funnelHtml(m) {
-  const max = Math.max(...m.funil.map((s) => s.value || 0), 0);
-  if (!max) return '<div class="empty-state">Sem dados de funil neste período.</div>';
-  const rows = m.funil.map((s) => `
-    <div class="funnel-row">
-      <div>${esc(s.label)}</div>
-      <div class="funnel-bar" role="img" aria-label="${esc(s.label)}: ${s.value ?? 0}"><div style="width:${max ? ((s.value || 0) / max) * 100 : 0}%"></div></div>
-      <div class="nums"><b>${s.value == null ? '—' : esc(fmt.int(s.value))}</b>
-        ${s.pctOfLeads != null && s.label !== 'Leads' ? ` · ${esc(fmt.pct(s.pctOfLeads * 100))} dos leads` : ''}</div>
-    </div>`).join('');
-  const lost = m.pararamResponder != null
-    ? `<div class="lost">${esc(fmt.int(m.pararamResponder))} lead(s) pararam de responder após o envio da cotação e 7 dias de follow-up${m.cotacoes ? ` (${esc(fmt.pct((m.pararamResponder / m.cotacoes) * 100))} das cotações)` : ''}.</div>` : '';
-  return rows + lost;
+  const stages = m.funil;
+  const max = Math.max(...stages.map((s) => s.value || 0), 0);
+  const title = '<div class="funnel-title">Funil comercial</div>';
+  if (!max) return title + '<div class="empty-state">Sem dados de funil neste período.</div>';
+
+  const W = 400, cx = 140, maxW = 240, minW = 104, segH = 58, gap = 36, padT = 6;
+  const H = padT * 2 + stages.length * segH + (stages.length - 1) * gap;
+  let prevW = maxW;
+  const widths = stages.map((s) => { // nunca mais largo que a etapa anterior
+    prevW = Math.min(prevW, Math.max(minW, maxW * Math.sqrt((s.value || 0) / max)));
+    return prevW;
+  });
+
+  const parts = stages.map((s, i) => {
+    const y = padT + i * (segH + gap);
+    const topW = widths[i];
+    const botW = i < stages.length - 1 ? widths[i + 1] : topW * 0.72;
+    const pts = [[cx - topW / 2, y], [cx + topW / 2, y], [cx + botW / 2, y + segH], [cx - botW / 2, y + segH]].map((p) => p.join(',')).join(' ');
+    const tip = `${s.title}: ${s.value == null ? 'sem dado' : fmt.int(s.value)}`
+      + (s.pctOfLeads != null && i ? ` (${fmt.pct(s.pctOfLeads)} dos leads)` : '')
+      + (s.conv != null ? ` · ${fmt.pct(s.conv)} da etapa anterior` : '');
+    const layer = s.value == null
+      ? `<polygon points="${pts}" class="fs-empty"/><text class="fl" x="${cx}" y="${y + 33}">${esc(s.label)}: —</text>`
+      : `<polygon points="${pts}" class="fs fs${i + 1}"/>
+         <text class="fv fi${i + 1}" x="${cx}" y="${y + 27}">${esc(fmt.int(s.value))}</text>
+         <text class="fl fi${i + 1}" x="${cx}" y="${y + 45}">${esc(s.label)}</text>`;
+    let link = '';
+    if (i < stages.length - 1) {
+      const next = stages[i + 1];
+      const y0 = y + segH, ym = y0 + gap / 2;
+      link = `<path d="M${cx - 6},${y0 + 9} L${cx + 6},${y0 + 9} L${cx},${y0 + gap - 7} Z" class="arrow"/>
+        <text class="conv" x="${cx + maxW / 2 + 18}" y="${ym}">${next.conv == null ? '—' : esc(fmt.pct(next.conv))}</text>
+        <text class="conv-sub" x="${cx + maxW / 2 + 18}" y="${ym + 13}">${next.conv == null ? 'sem dado' : 'de conversão'}</text>`;
+    }
+    return `<g><title>${esc(tip)}</title>${layer}</g>${link}`;
+  }).join('');
+
+  const last = stages[stages.length - 1];
+  const row = (label, value, note) => `<div class="frow"><span>${esc(label)}</span><span><b>${esc(value)}</b>${note ? ` <i>${esc(note)}</i>` : ''}</span></div>`;
+  const foot = [
+    last.pctOfLeads != null ? row('Lead → venda', fmt.pct(last.pctOfLeads)) : '',
+    m.leadsResponderam != null ? row('Responderam o 1º contato', fmt.int(m.leadsResponderam), m.leads ? `${fmt.pct((m.leadsResponderam / m.leads) * 100)} dos leads` : '') : '',
+    m.pararamResponder != null ? row('Pararam de responder (pós follow-up)', fmt.int(m.pararamResponder), m.cotacoes ? `${fmt.pct((m.pararamResponder / m.cotacoes) * 100)} das cotações` : '') : '',
+  ].join('');
+
+  return `${title}
+    <svg class="funnel-svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Funil comercial: ${esc(stages.map((s) => `${s.label} ${s.value == null ? 'sem dado' : fmt.int(s.value)}`).join(', '))}">${parts}</svg>
+    <div class="funnel-foot">${foot}</div>
+    <div class="hint">Largura das camadas proporcional à quantidade (escala de raiz quadrada), com largura mínima.</div>`;
 }
 
 function trendHtml(c) {

@@ -76,11 +76,21 @@ test('health score: calculado, faixa e override manual', () => {
   assert.equal(manual.healthBand, 'Risco');
 });
 
-test('funil: % da etapa anterior pula etapas vazias', () => {
-  const m = Metrics.compute(client, ['2026-09']);
-  const vendas = m.funil.find((s) => s.label === 'Vendas');
-  assert.equal(vendas.pctOfLeads, 6 / 200);
-  assert.equal(vendas.pctOfPrev, 6 / 200); // anteriores vazias => compara com leads
+test('funil: conversão entre etapas consecutivas e % sobre os leads', () => {
+  const m = Metrics.compute({ project: {}, months: { a: { leads: 100, leadsQualificados: 25, cotacoes: 18, negociacoes: 10, vendas: 3 } } }, ['a']);
+  assert.deepEqual(m.funil.map((s) => s.key), ['leads', 'leadsQualificados', 'cotacoes', 'negociacoes', 'vendas']);
+  assert.deepEqual(m.funil.map((s) => s.conv && Math.round(s.conv)), [null, 25, 72, 56, 30]);
+  assert.equal(m.funil[4].pctOfLeads, 3);
+});
+
+test('funil: etapa sem dado não inventa conversão', () => {
+  const m = Metrics.compute(client, ['2026-09']); // só leads e vendas informados
+  const byKey = Object.fromEntries(m.funil.map((s) => [s.key, s]));
+  assert.equal(byKey.leadsQualificados.conv, null);
+  assert.equal(byKey.vendas.conv, null); // a etapa anterior (negociações) não existe
+  assert.equal(byKey.vendas.pctOfLeads, 3);
+  const z = Metrics.compute({ project: {}, months: { a: { leads: 0, leadsQualificados: 0 } } }, ['a']);
+  assert.equal(z.funil[1].conv, null); // divisão por zero
 });
 
 test('variação mês a mês: relativa, absoluta e direção boa/ruim', () => {
