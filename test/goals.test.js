@@ -284,3 +284,39 @@ test('linhas de pessoas são marcadas como inteiras (para o formulário)', () =>
   const inteiras = Goals.ROWS.filter((r) => r.integer).map((r) => r.key);
   assert.deepEqual(inteiras, ['leads', 'leadsQualificados', 'cotacoes', 'negociacoes', 'vendas']);
 });
+
+test('planFromSales: do alvo de vendas ao investimento, passando pelo funil', () => {
+  const r = Goals.planFromSales({ vendas: 28, cpl: 35, taxas: { leadsQualificados: 25, cotacoes: 70, negociacoes: 60, vendas: 30 } });
+  assert.ok(r.totais.vendas >= 28);
+  assert.ok(Number.isInteger(r.totais.leads) && Number.isInteger(r.totais.cotacoes));
+  near(r.investimento, r.totais.leads * 35, 'investimento = leads × CPL');
+  // um lead a menos não entrega as 28 vendas (é o menor número possível)
+  const menos = Goals.planFromSales({ vendas: 28, cpl: 35, taxas: { leadsQualificados: 25, cotacoes: 70, negociacoes: 60, vendas: 30 } }).totais.leads - 1;
+  let p = menos; for (const t of [25, 70, 60, 30]) p = Math.ceil(p * t / 100 - 1e-9);
+  assert.ok(p < 28);
+  // a meta devolvida, resolvida pelo motor, reproduz o mesmo funil e o mesmo investimento
+  const res = Goals.resolveTargets(r.meta);
+  assert.equal(res.targets.leads, r.totais.leads);
+  assert.equal(res.targets.vendas, r.totais.vendas);
+  near(res.targets.investimento, r.investimento);
+  const need = Goals.investmentNeeded(r.meta);
+  near(need.necessario, r.investimento);
+});
+
+test('planFromSales: dado faltando ou inválido devolve null', () => {
+  const taxas = { leadsQualificados: 25, cotacoes: 70, negociacoes: 60, vendas: 30 };
+  assert.equal(Goals.planFromSales({ vendas: 0, cpl: 35, taxas }), null);
+  assert.equal(Goals.planFromSales({ vendas: 10, cpl: 0, taxas }), null);
+  assert.equal(Goals.planFromSales({ vendas: 10, cpl: 35, taxas: { ...taxas, cotacoes: 0 } }), null);
+  assert.equal(Goals.planFromSales({ vendas: 10, cpl: 35, taxas: { ...taxas, cotacoes: 120 } }), null);
+});
+
+test('investmentNeeded: leads por custo → leads × teto; sem custo → o valor planejado', () => {
+  const a = Goals.investmentNeeded({ investimento: 30000, itens: { leads: { modo: 'custo', valor: 35 } } });
+  assert.equal(a.leads, 858);
+  near(a.necessario, 858 * 35);
+  near(a.planejado, 30000);
+  const b = Goals.investmentNeeded({ investimento: 5000, itens: { leads: { modo: 'numero', valor: 100 } } });
+  near(b.necessario, 5000);
+  assert.equal(Goals.investmentNeeded({}), null);
+});

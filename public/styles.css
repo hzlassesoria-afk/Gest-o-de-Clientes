@@ -177,6 +177,16 @@ table.goal-table td[data-tone] input { background: transparent; }
   .stage-eq { grid-column: 1 / -1; }
 }
 
+/* Investimento necessário e calculadora da meta */
+.card.need { border-color: var(--accent); background: var(--accent-soft); }
+.card.need .value { color: var(--accent); }
+.calc { border: 1px solid var(--accent-soft); border-radius: 10px; background: var(--surface-2); padding: 10px 12px; margin: 12px 0; }
+.calc summary { cursor: pointer; font-weight: 700; color: var(--accent); }
+.calc-body { margin-top: 10px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.calc-body .form-grid { width: 100%; }
+.calc-out { font-size: 14px; line-height: 1.6; }
+.calc-out b { color: var(--accent); }
+
 /* Meta + infográfico lado a lado */
 .mensal { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 16px; align-items: start; }
 .mensal .grid-sm { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }

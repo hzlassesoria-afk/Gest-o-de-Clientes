@@ -194,6 +194,49 @@
   }
 
   /**
+   * Do fim para o começo: quanto investir em anúncios para bater `vendas`, dadas as taxas de conversão
+   * entre as etapas e o custo por lead. Acha o menor número de leads que, passando pelo funil
+   * (sempre arredondando pessoas para cima, como em resolveTargets), entrega pelo menos `vendas`.
+   * `taxas`: { leadsQualificados, cotacoes, negociacoes, vendas } em % da etapa anterior (0 a 100).
+   * Devolve { investimento, totais, meta } (meta no formato novo, pronto para salvar) ou null se faltar dado.
+   */
+  function planFromSales({ vendas, taxas, cpl }) {
+    const V = num(vendas), c = num(cpl);
+    const steps = STAGES.slice(1);
+    const rates = steps.map((k) => num(taxas && taxas[k]));
+    if (!V || V <= 0 || !c || c <= 0 || rates.some((r) => r == null || r <= 0 || r > 100)) return null;
+    const run = (L) => {
+      const t = { leads: L };
+      let prev = L;
+      steps.forEach((k, i) => { prev = ceilInt((prev * rates[i]) / 100); t[k] = prev; });
+      return t;
+    };
+    const product = rates.reduce((p, r) => p * (r / 100), 1);
+    let L = Math.max(1, ceilInt(Math.ceil(V) / product));
+    while (L > 1 && run(L - 1).vendas >= V) L--;                    // o início da conta pode já passar da meta
+    while (run(L).vendas < V && L < 1e7) L++;                      // ou ficar abaixo dela (arredondamentos)
+    const totais = run(L);
+    const investimento = L * c;
+    const itens = { leads: { modo: 'custo', valor: c } };
+    steps.forEach((k, i) => { itens[k] = { modo: 'taxa', valor: rates[i] }; });
+    return { investimento, totais, meta: { investimento, itens } };
+  }
+
+  /**
+   * Quanto investir para bater a meta do mês: leads da meta × custo por lead (teto), quando a meta de leads
+   * é definida por custo; senão, o valor investido planejado. `planejado` é o que está na meta do mês.
+   */
+  function investmentNeeded(meta) {
+    const { info, targets } = resolveTargets(meta);
+    const planejado = targets.investimento;
+    const leads = info.leads;
+    if (leads.modo === 'custo' && leads.total != null && leads.custo != null) {
+      return { necessario: leads.total * leads.custo, planejado, leads: leads.total, cpl: leads.custo, fromCpl: true };
+    }
+    return planejado == null ? null : { necessario: planejado, planejado, leads: leads.total, cpl: leads.custo, fromCpl: false };
+  }
+
+  /**
    * Distribui a meta de UMA métrica por semanas e dias úteis, com compensação.
    * `integer`: metas em números inteiros (pessoas); senão, contínuo (dinheiro).
    * @returns {{ week: Object<number,{meta,base}>, day: Object<string,{meta,base}> }}
@@ -414,6 +457,6 @@
 
   return {
     META_FIELDS, DAY_FIELDS, ROWS, STAGES, MODES, MODE_LABEL, DEFAULT_MODE, DAY_THEME, WEEKDAY_SHORT,
-    compute, calendar, holidays, defaultOffDays, normalizeMeta, resolveTargets, isRealDate, todayISO, daysInMonth,
+    compute, calendar, holidays, defaultOffDays, normalizeMeta, resolveTargets, planFromSales, investmentNeeded, isRealDate, todayISO, daysInMonth,
   };
 });

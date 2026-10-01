@@ -375,8 +375,32 @@ const ROW_BY_KEY = Object.fromEntries(Goals.ROWS.map((r) => [r.key, r]));
 const fval = (row, v) => (v == null ? '—' : row.fmt === 'brl' ? fmt.brl(v) : row.fmt === 'int' ? fmt.int(v) : fmt.dec(v));
 
 // Textos de cada "slot" (trechos que mudam quando o realizado muda) e o tom de cada célula de dia
-function goalSlots(res) {
+// Quanto investir em anúncios para bater a meta (valor, e a conta por trás dele)
+function needSlots(res, plan, html) {
+  const n = Goals.investmentNeeded((plan && plan.meta) || {});
+  if (!n) {
+    html['need:value'] = '<span class="na">—</span>';
+    html['need:note'] = 'Informe o valor investido ou use a calculadora em “Editar meta do mês”.';
+    return;
+  }
+  const parts = [];
+  parts.push(n.fromCpl
+    ? `${esc(fmt.int(n.leads))} leads × ${esc(fmt.brl(n.cpl))} (teto por lead)`
+    : 'Valor investido planejado na meta');
+  if (n.fromCpl && n.planejado != null && Math.abs(n.planejado - n.necessario) > 0.005) {
+    parts.push(n.planejado < n.necessario
+      ? `Planejado ${esc(fmt.brl(n.planejado))}: faltam ${esc(fmt.brl(n.necessario - n.planejado))} para cobrir`
+      : `Planejado ${esc(fmt.brl(n.planejado))}: cobre a meta`);
+  }
+  const feito = res.rows.investimento.realizado;
+  if (feito != null) parts.push(`Já investido ${esc(fmt.brl(feito))} · falta investir <b>${esc(fmt.brl(Math.max(n.necessario - feito, 0)))}</b>`);
+  html['need:value'] = esc(fmt.brl(n.necessario));
+  html['need:note'] = parts.join('<br>');
+}
+
+function goalSlots(res, plan) {
   const html = {}, tone = {};
+  needSlots(res, plan, html);
   const setCell = (prefix, row, cell) => {
     html[`${prefix}:meta`] = cell.meta == null ? '<span class="na">—</span>'
       : `<span title="${cell.raised ? `Meta-base ${esc(fval(row, cell.base))}; sobe para compensar o que ficou abaixo` : ''}">${row.kind === 'cost' ? 'Teto ' : ''}${cell.raised ? '<span class="up">▲</span> ' : ''}${esc(fval(row, cell.meta))}</span>`;
@@ -461,10 +485,16 @@ function renderGoals() {
   }
 
   const res = Goals.compute(month, plan);
-  const slots = goalSlots(res);
+  const slots = goalSlots(res, plan);
   const slot = (id) => `<span data-slot="${esc(id)}">${slots.html[id] ?? ''}</span>`;
 
-  const monthCards = res.rowDefs.map((row) => `
+  const needCard = `
+    <div class="card need wide">
+      <div class="label">Investir em anúncios para bater a meta</div>
+      <div class="value">${slot('need:value')}</div>
+      <div class="note">${slot('need:note')}</div>
+    </div>`;
+  const monthCards = needCard + res.rowDefs.map((row) => `
     <div class="card" data-tone-of="m:${row.key}">
       <div class="label">${esc(row.label)}${row.support ? ' <span class="pill">apoio</span>' : ''}</div>
       <div class="value">${slot(`m:${row.key}:real`)}</div>
@@ -561,9 +591,9 @@ function saveGoalDay(month, date, key, raw) {
   plan.days = plan.days || {};
   plan.days[date] = { ...plan.days[date], [key]: value };
   if (Object.values(plan.days[date]).every((v) => v == null)) delete plan.days[date];
-  applySlots(goalSlots(Goals.compute(month, plan)));
+  applySlots(goalSlots(Goals.compute(month, plan), plan));
   refreshChart(month);
-  document.getElementById('goal-alert').innerHTML = `<span data-slot="alert">${goalSlots(Goals.compute(month, plan)).html.alert}</span>`;
+  document.getElementById('goal-alert').innerHTML = `<span data-slot="alert">${goalSlots(Goals.compute(month, plan), plan).html.alert}</span>`;
   state.saveChain = state.saveChain
     .then(() => api(`/clients/${encodeURIComponent(c.id)}/goals/${month}/days/${date}`, { method: 'PUT', body: { [key]: raw } }))
     .catch(async (err) => { alert('Não foi possível salvar: ' + err.message); state.client = await api(`/clients/${encodeURIComponent(c.id)}`); renderGoals(); });
@@ -587,6 +617,15 @@ function openGoalDialog(month) {
   const prev = goalPlan(c, shiftMonth(month, -1));
   const cur = Goals.normalizeMeta((plan && plan.meta) || (prev && prev.meta) || {});
 
+  // Valores iniciais da calculadora: o que a meta atual já implica (taxas entre as etapas, custo por lead, vendas)
+  const calcInit = (() => {
+    const { info } = Goals.resolveTargets(cur);
+    const r1 = (v) => (v == null ? null : Math.round(v * 10) / 10);
+    const taxas = {};
+    for (const k of Goals.STAGES.slice(1)) taxas[k] = r1(info[k].taxa);
+    return { vendas: info.vendas.total, cpl: info.leads.custo == null ? null : Math.round(info.leads.custo * 100) / 100, taxas };
+  })();
+
   const stageRow = (k) => {
     const it = cur.itens[k];
     return `<div class="stage-row">
@@ -604,6 +643,21 @@ function openGoalDialog(month) {
     <div class="dlg-body">
       ${!plan && prev ? '<div class="notice good">Valores preenchidos com a meta do mês anterior. Ajuste o que precisar.</div>' : ''}
       <div class="form-grid"><label>Valor investido no mês (R$)<input type="number" min="0" step="any" inputmode="decimal" name="investimento" value="${esc(cur.investimento ?? '')}"></label></div>
+      <details class="calc" id="calc">
+        <summary>Calculadora: quanto preciso investir para bater a meta de vendas?</summary>
+        <div class="calc-body">
+          <div class="form-grid">
+            <label>Meta de vendas (un.)<input type="number" min="1" step="1" inputmode="numeric" name="calc-vendas" value="${esc(calcInit.vendas ?? '')}"></label>
+            <label>Custo por lead (R$)<input type="number" min="0" step="any" inputmode="decimal" name="calc-cpl" value="${esc(calcInit.cpl ?? '')}"></label>
+            <label>Leads → qualificados (%)<input type="number" min="0" max="100" step="any" inputmode="decimal" name="calc-leadsQualificados" value="${esc(calcInit.taxas.leadsQualificados ?? '')}"></label>
+            <label>Qualificados → cotações (%)<input type="number" min="0" max="100" step="any" inputmode="decimal" name="calc-cotacoes" value="${esc(calcInit.taxas.cotacoes ?? '')}"></label>
+            <label>Cotações → negociações (%)<input type="number" min="0" max="100" step="any" inputmode="decimal" name="calc-negociacoes" value="${esc(calcInit.taxas.negociacoes ?? '')}"></label>
+            <label>Negociações → vendas (%)<input type="number" min="0" max="100" step="any" inputmode="decimal" name="calc-vendas-taxa" value="${esc(calcInit.taxas.vendas ?? '')}"></label>
+          </div>
+          <div class="calc-out" id="calc-out" aria-live="polite"></div>
+          <button type="button" class="btn btn-ghost" id="calc-apply" disabled>Usar na meta</button>
+        </div>
+      </details>
       <p class="hint">Para cada etapa do funil, escolha como definir a meta: <b>número exato</b>, <b>porcentagem</b> da etapa anterior ou <b>custo</b> por unidade (investimento ÷ custo). Ao lado aparece o que isso equivale nas outras formas.</p>
       <div class="stage-grid">${Goals.STAGES.map(stageRow).join('')}</div>
       <label class="check-row"><input type="checkbox" name="compensarExcedente" ${plan && plan.compensarExcedente ? 'checked' : ''}>
@@ -640,8 +694,35 @@ function openGoalDialog(month) {
       $(`[data-eq="${k}"]`).textContent = needBase ? 'Defina a etapa anterior para calcular.' : needInv ? 'Informe o valor investido para calcular.' : parts.join(' · ');
     }
   };
-  form.oninput = preview;
-  form.onchange = preview;
+  // Calculadora: do alvo de vendas para o investimento (usa o motor da meta, com pessoas sempre inteiras)
+  let calcResult = null;
+  const calcOut = $('#calc-out'), calcApply = $('#calc-apply');
+  const readCalc = () => ({
+    vendas: form.elements['calc-vendas'].value, cpl: form.elements['calc-cpl'].value,
+    taxas: Object.fromEntries(Goals.STAGES.slice(1).map((k) => [k, form.elements[k === 'vendas' ? 'calc-vendas-taxa' : 'calc-' + k].value])),
+  });
+  const calcPreview = () => {
+    calcResult = Goals.planFromSales(readCalc());
+    calcApply.disabled = !calcResult;
+    if (!calcResult) { calcOut.textContent = 'Preencha a meta de vendas, o custo por lead e as quatro taxas (maiores que 0 e até 100%).'; return; }
+    const t = calcResult.totais;
+    calcOut.innerHTML = `${esc(fmt.int(t.leads))} leads → ${esc(fmt.int(t.leadsQualificados))} qualificados → ${esc(fmt.int(t.cotacoes))} cotações → ${esc(fmt.int(t.negociacoes))} negociações → <b>${esc(fmt.int(t.vendas))} vendas</b><br>
+      Investimento necessário em anúncios: <b>${esc(fmt.brl(calcResult.investimento))}</b> (${esc(fmt.int(t.leads))} leads × ${esc(fmt.brl(Number(form.elements['calc-cpl'].value)))})`;
+  };
+  calcApply.onclick = () => {
+    if (!calcResult) return;
+    form.elements.investimento.value = Math.round(calcResult.investimento * 100) / 100;
+    for (const k of Goals.STAGES) {
+      const it = calcResult.meta.itens[k];
+      form.elements['modo-' + k].value = it.modo;
+      form.elements['val-' + k].value = it.valor;
+    }
+    $('#calc').open = false;
+    preview();
+  };
+  form.oninput = (e) => { if (e.target.name && e.target.name.startsWith('calc-')) calcPreview(); else preview(); };
+  form.onchange = form.oninput;
+  calcPreview();
   preview();
   $('#cancel').onclick = closeDialog;
   const del = $('#del-goal');
