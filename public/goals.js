@@ -9,14 +9,32 @@
  * Se ficou abaixo, a meta seguinte sobe. Se superou, por padrão a meta seguinte
  * NÃO cai abaixo da meta-base (opção `compensarExcedente` faz ela cair).
  *
- * Custo por lead (CPL) e custo por lead qualificado (CPLQ) são tetos: a meta é a
- * mesma em todos os níveis e o realizado é investimento ÷ leads do período.
+ * Cada etapa do funil (leads, qualificados, cotações, negociações, vendas) pode ser
+ * definida na meta do mês de três jeitos:
+ *   - número exato;
+ *   - taxa: % da etapa anterior que tem meta (ex.: vendas = 20% das negociações);
+ *   - custo: R$ por unidade (meta = investimento ÷ custo).
+ * Linhas de custo (por lead, por lead qualificado e, quando escolhido, por cotação,
+ * negociação ou venda) são tetos: a meta é a mesma em todos os níveis e o realizado é
+ * investimento ÷ quantidade do período.
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.Goals = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
-  // Metas que o usuário informa no mês
+  // Etapas do funil que têm meta, em ordem, e como cada uma pode ser definida
+  const STAGES = ['leads', 'leadsQualificados', 'cotacoes', 'negociacoes', 'vendas'];
+  const MODES = {
+    leads: ['custo', 'numero'],
+    leadsQualificados: ['custo', 'taxa', 'numero'],
+    cotacoes: ['numero', 'taxa', 'custo'],
+    negociacoes: ['numero', 'taxa', 'custo'],
+    vendas: ['numero', 'taxa', 'custo'],
+  };
+  const DEFAULT_MODE = { leads: 'custo', leadsQualificados: 'custo', cotacoes: 'numero', negociacoes: 'numero', vendas: 'numero' };
+  const MODE_LABEL = { numero: 'Número exato', taxa: '% da etapa anterior', custo: 'Custo (R$ por unidade)' };
+  // Formato antigo (planos salvos antes das opções): cpl, cplQualificado, cotacoes, negociacoes, vendas
+  const LEGACY_KEY = { leads: 'cpl', leadsQualificados: 'cplQualificado', cotacoes: 'cotacoes', negociacoes: 'negociacoes', vendas: 'vendas' };
   const META_FIELDS = ['investimento', 'cpl', 'cplQualificado', 'cotacoes', 'negociacoes', 'vendas'];
   // Realizado que o usuário lança por dia (valores brutos)
   const DAY_FIELDS = ['investimento', 'leads', 'leadsQualificados', 'cotacoes', 'negociacoes', 'vendas'];
@@ -26,12 +44,15 @@
   const ROWS = [
     { key: 'investimento', label: 'Valor investido', fmt: 'brl', kind: 'volume', input: true },
     { key: 'leads', label: 'Leads', fmt: 'dec', kind: 'volume', input: true, support: true },
-    { key: 'cpl', label: 'Custo por lead', fmt: 'brl', kind: 'cost', numerator: 'investimento', denominator: 'leads' },
+    { key: 'cpl', label: 'Custo por lead', fmt: 'brl', kind: 'cost', numerator: 'investimento', denominator: 'leads', stage: 'leads' },
     { key: 'leadsQualificados', label: 'Leads qualificados', fmt: 'dec', kind: 'volume', input: true, support: true },
-    { key: 'cplQualificado', label: 'Custo por lead qualificado', fmt: 'brl', kind: 'cost', numerator: 'investimento', denominator: 'leadsQualificados' },
+    { key: 'cplQualificado', label: 'Custo por lead qualificado', fmt: 'brl', kind: 'cost', numerator: 'investimento', denominator: 'leadsQualificados', stage: 'leadsQualificados' },
     { key: 'cotacoes', label: 'Cotação', fmt: 'dec', kind: 'volume', input: true },
+    { key: 'custoCotacao', label: 'Custo por cotação', fmt: 'brl', kind: 'cost', numerator: 'investimento', denominator: 'cotacoes', stage: 'cotacoes', optional: true },
     { key: 'negociacoes', label: 'Negociação', fmt: 'dec', kind: 'volume', input: true },
+    { key: 'custoNegociacao', label: 'Custo por negociação', fmt: 'brl', kind: 'cost', numerator: 'investimento', denominator: 'negociacoes', stage: 'negociacoes', optional: true },
     { key: 'vendas', label: 'Vendas', fmt: 'dec', kind: 'volume', input: true },
+    { key: 'custoVenda', label: 'Custo por venda', fmt: 'brl', kind: 'cost', numerator: 'investimento', denominator: 'vendas', stage: 'vendas', optional: true },
   ];
 
   // Foco de cada dia da semana (seg a sex)
@@ -118,17 +139,47 @@
   }
 
   // ---------- metas mensais derivadas ----------
-  function monthlyTargets(meta) {
+  /** Lê a meta do mês nos dois formatos (novo: { investimento, itens }; antigo: chaves soltas). */
+  function normalizeMeta(meta) {
     const m = meta || {};
-    const inv = num(m.investimento), cpl = num(m.cpl), cplq = num(m.cplQualificado);
-    return {
-      investimento: inv,
-      leads: div(inv, cpl),
-      leadsQualificados: div(inv, cplq),
-      cotacoes: num(m.cotacoes),
-      negociacoes: num(m.negociacoes),
-      vendas: num(m.vendas),
-    };
+    const itens = {};
+    for (const k of STAGES) {
+      const it = m.itens && m.itens[k];
+      if (it && MODES[k].includes(it.modo)) itens[k] = { modo: it.modo, valor: num(it.valor) };
+      else itens[k] = { modo: DEFAULT_MODE[k], valor: num(m[LEGACY_KEY[k]]) };
+    }
+    return { investimento: num(m.investimento), itens };
+  }
+
+  /**
+   * Transforma as escolhas da meta do mês em totais do mês por etapa.
+   * @returns {{ targets: Object, info: Object }} info[etapa] = { modo, total, custo, taxa }
+   *   `custo` (R$ por unidade) e `taxa` (% da etapa anterior com meta) são sempre calculados,
+   *   mesmo quando a etapa foi definida de outro jeito, para mostrar as equivalências.
+   */
+  function resolveTargets(meta) {
+    const n = normalizeMeta(meta);
+    const inv = n.investimento;
+    const targets = { investimento: inv };
+    const info = {};
+    let base = null; // total da última etapa que tem meta
+    for (const k of STAGES) {
+      const { modo, valor } = n.itens[k];
+      let total = null;
+      if (valor != null) {
+        if (modo === 'numero') total = valor;
+        else if (modo === 'custo') total = div(inv, valor);
+        else if (modo === 'taxa') total = base != null ? (base * valor) / 100 : null;
+      }
+      targets[k] = total;
+      info[k] = {
+        modo, total,
+        custo: total != null && total > 0 ? div(inv, total) : (modo === 'custo' ? valor : null),
+        taxa: total != null && base ? (total / base) * 100 : null,
+      };
+      if (total != null) base = total;
+    }
+    return { targets, info };
   }
 
   /**
@@ -197,7 +248,9 @@
     const days = goal.days || {};
     const offDays = Array.isArray(goal.naoUteis) ? goal.naoUteis : defaultOffDays(month);
     const weeks = calendar(month, offDays);
-    const targets = monthlyTargets(goal.meta);
+    const { targets, info } = resolveTargets(goal.meta);
+    const norm = normalizeMeta(goal.meta);
+    const rowDefs = ROWS.filter((r) => !r.optional || norm.itens[r.stage].modo === 'custo');
     const compensar = !!goal.compensarExcedente;
     const workingDays = weeks.flatMap((w) => w.days.filter((d) => d.working));
 
@@ -228,7 +281,7 @@
             raised: meta != null && base != null && meta > base * (1 + 1e-6) + EPS,
           };
         } else {
-          const metaCost = num(r.key === 'cpl' ? (goal.meta || {}).cpl : (goal.meta || {}).cplQualificado);
+          const metaCost = info[r.stage].custo;
           const realizado = div(real[r.numerator], real[r.denominator]);
           rows[r.key] = { meta: metaCost, base: metaCost, realizado, pct: null, falta: null, tone: toneCost(realizado, metaCost), raised: false };
         }
@@ -282,13 +335,13 @@
       .map((d) => d.date);
 
     return {
-      month, today, workingDays: workingDays.length, offDays, weeks: weekOut, rows: monthRows,
+      month, today, workingDays: workingDays.length, offDays, weeks: weekOut, rows: monthRows, rowDefs, info,
       hasTargets: VOLUME.some((k) => targets[k] != null), semLancamento,
     };
   }
 
   return {
-    META_FIELDS, DAY_FIELDS, ROWS, DAY_THEME, WEEKDAY_SHORT,
-    compute, calendar, holidays, defaultOffDays, monthlyTargets, isRealDate, todayISO, daysInMonth,
+    META_FIELDS, DAY_FIELDS, ROWS, STAGES, MODES, MODE_LABEL, DEFAULT_MODE, DAY_THEME, WEEKDAY_SHORT,
+    compute, calendar, holidays, defaultOffDays, normalizeMeta, resolveTargets, isRealDate, todayISO, daysInMonth,
   };
 });

@@ -92,9 +92,33 @@ function cleanGoalNumbers(input, allowed) {
   return out;
 }
 
+// Como cada etapa do funil pode ser definida (espelha MODES em public/goals.js)
+const GOAL_MODES = {
+  leads: ['custo', 'numero'],
+  leadsQualificados: ['custo', 'taxa', 'numero'],
+  cotacoes: ['numero', 'taxa', 'custo'],
+  negociacoes: ['numero', 'taxa', 'custo'],
+  vendas: ['numero', 'taxa', 'custo'],
+};
+
+/** Meta do mês: formato novo { investimento, itens: { etapa: { modo, valor } } } ou o antigo, com chaves soltas. */
+function cleanGoalMeta(meta) {
+  if (!meta || typeof meta !== 'object' || meta.itens === undefined) return cleanGoalNumbers(meta, GOAL_META_FIELDS);
+  const out = { ...cleanGoalNumbers(meta, ['investimento']), itens: {} };
+  if (meta.itens === null || typeof meta.itens !== 'object') throw Object.assign(new Error('"itens" deve ser um objeto'), { status: 400 });
+  for (const [k, it] of Object.entries(meta.itens)) {
+    if (!GOAL_MODES[k]) continue;
+    if (!it || !GOAL_MODES[k].includes(it.modo)) throw Object.assign(new Error(`Modo inválido para "${k}" (use ${GOAL_MODES[k].join(', ')})`), { status: 400 });
+    const valor = cleanGoalNumbers({ valor: it.valor }, ['valor']).valor;
+    if (it.modo === 'taxa' && valor != null && valor > 100) throw Object.assign(new Error(`A porcentagem de "${k}" não pode passar de 100`), { status: 400 });
+    out.itens[k] = { modo: it.modo, valor };
+  }
+  return out;
+}
+
 function cleanGoalPlan(input, month) {
   const out = {};
-  if ('meta' in input) out.meta = cleanGoalNumbers(input.meta, GOAL_META_FIELDS);
+  if ('meta' in input) out.meta = cleanGoalMeta(input.meta);
   if ('compensarExcedente' in input) out.compensarExcedente = !!input.compensarExcedente;
   if ('naoUteis' in input) {
     if (!Array.isArray(input.naoUteis)) throw Object.assign(new Error('"naoUteis" deve ser uma lista de datas'), { status: 400 });
@@ -206,7 +230,9 @@ async function handleApi(req, res, url) {
       if (req.method === 'PUT') {
         const clean = cleanGoalPlan(await readBody(req), month);
         const prev = client.goals[month] || { meta: {}, days: {} };
-        client.goals[month] = { ...prev, ...clean, meta: { ...prev.meta, ...clean.meta }, days: prev.days || {} };
+        // Formato novo (com "itens") substitui a meta inteira; o antigo (chaves soltas) mescla campo a campo
+        const meta = clean.meta && clean.meta.itens ? clean.meta : { ...prev.meta, ...clean.meta };
+        client.goals[month] = { ...prev, ...clean, meta, days: prev.days || {} };
         await saveDb(db);
         return send(res, 200, client);
       }
@@ -310,4 +336,4 @@ if (require.main === module) {
   server.listen(PORT, () => console.log(`Gestão de Clientes rodando em http://localhost:${PORT}`));
 }
 
-module.exports = { server, handler, cleanMonth, cleanProject, cleanGoalPlan, cleanGoalNumbers };
+module.exports = { server, handler, cleanMonth, cleanProject, cleanGoalPlan, cleanGoalNumbers, cleanGoalMeta };

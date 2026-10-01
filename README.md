@@ -25,13 +25,18 @@ Definições:
 - **Health Score** = média ponderada de NPS, ROAS vs. meta, inadimplência, ansiedade, reuniões e reclamações (só entram os itens com dado). Um valor manual no mês substitui o cálculo.
 
 ## Metas da rotina comercial (mensal → semanal → diário)
-Em "Definir meta do mês" você informa: valor investido, custo por lead (teto), custo por lead qualificado (teto), cotações, negociações e vendas. Depois lança **só o realizado** de cada dia (investimento, leads, leads qualificados, cotações, negociações, vendas); o resto é calculado (`public/goals.js`).
+Em "Definir meta do mês" você informa o valor investido e, para **cada etapa do funil** (leads, leads qualificados, cotações, negociações, vendas), escolhe como definir a meta:
+- **Número exato** (ex.: 20 vendas);
+- **Porcentagem** da etapa anterior que tem meta (ex.: vendas = 25% das negociações);
+- **Custo** por unidade, em R$ (meta = investimento ÷ custo; ex.: custo por venda R$ 300 com R$ 6.000 → 20 vendas).
+
+Ao lado de cada etapa aparece o que a escolha equivale nas outras formas (número, custo e %). Leads só aceitam número ou custo; os leads qualificados aceitam as três. Depois lança **só o realizado** de cada dia (investimento, leads, leads qualificados, cotações, negociações, vendas); o resto é calculado (`public/goals.js`).
 
 - **Dias úteis**: seg–sex. Feriados nacionais (inclui Sexta-feira Santa) já entram como folga; use "marcar folga" no cabeçalho do dia para ajustar. As semanas são as semanas do calendário (seg–sex) que têm dia útil no mês, então um mês pode ter 4 a 6.
 - **Meta-base**: meta do mês ÷ dias úteis, proporcional aos dias úteis de cada semana.
 - **Compensação**: meta da semana = (meta do mês − realizado até a semana anterior) ÷ dias úteis que faltam × dias úteis da semana. Meta do dia = (meta da semana − realizado na semana até ontem) ÷ dias úteis que faltam na semana. Ficou abaixo → a meta seguinte sobe (▲). Superou → a meta seguinte não cai abaixo da base (opção na meta do mês faz ela cair).
 - **Dia sem lançamento** no passado conta como zero (e é avisado); hoje e o futuro são projetados como "meta batida".
-- **Custo por lead / por lead qualificado** são tetos fixos; o realizado é investimento ÷ leads do período (razão dos totais, nunca média de médias). Leads e leads qualificados entram como linhas de apoio, com meta = investimento ÷ custo.
+- **Linhas de custo** (por lead, por lead qualificado e, quando você escolhe custo, por cotação, negociação ou venda) são tetos fixos: a meta de custo é a mesma em todos os níveis; o realizado é investimento ÷ quantidade do período (razão dos totais, nunca média de médias). Leads e leads qualificados entram como linhas de apoio, com meta = investimento ÷ custo.
 - Metas de cotação, negociação e vendas podem ficar fracionadas (ex.: 0,5 venda/dia) — é o ritmo diário esperado.
 
 ## Integração com o Monday

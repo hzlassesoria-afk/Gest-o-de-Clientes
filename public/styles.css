@@ -151,3 +151,22 @@ table.goal-table td[data-tone="warn"] { background: var(--warn-bg); }
 table.goal-table td[data-tone="bad"] { background: var(--bad-bg); }
 table.goal-table td[data-tone] input { background: transparent; }
 .linkbtn { font: inherit; font-size: 11px; font-weight: 400; background: none; border: 0; padding: 2px 0 0; color: var(--accent); cursor: pointer; text-decoration: underline; }
+
+/* Meta do mês: número exato, % ou custo por etapa */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.stage-grid { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; margin: 12px 0; }
+.stage-row { display: grid; grid-template-columns: 150px minmax(190px, 1fr) 150px; gap: 6px 12px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.stage-row:last-child { border-bottom: 0; }
+.stage-name { font-weight: 600; }
+.stage-mode select { width: 100%; }
+.inwrap { display: flex; align-items: center; gap: 6px; }
+.inwrap input { width: 100%; min-width: 0; }
+.inwrap .unit { color: var(--muted); font-size: 13px; min-width: 22px; }
+.stage-eq { grid-column: 2 / -1; margin: 0; min-height: 16px; }
+.check-row { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; margin-top: 4px; }
+.check-row input { margin-top: 3px; }
+@media (max-width: 800px) {
+  .stage-row { grid-template-columns: 1fr 1fr; }
+  .stage-name { grid-column: 1 / -1; }
+  .stage-eq { grid-column: 1 / -1; }
+}

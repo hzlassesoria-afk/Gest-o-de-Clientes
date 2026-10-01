@@ -126,3 +126,24 @@ test('metas: cria plano do mês, lança realizado do dia e valida entradas', asy
   r = await call(base, 'DELETE');
   assert.equal(r.body.goals['2027-02'], undefined);
 });
+
+test('metas: meta por número, porcentagem ou custo é validada e substitui a anterior', async () => {
+  const base = '/api/clients/petra-seguros/goals/2027-03';
+  let r = await call(base, 'PUT', { meta: { investimento: '6000', itens: {
+    leads: { modo: 'custo', valor: '30' }, leadsQualificados: { modo: 'taxa', valor: 40 },
+    cotacoes: { modo: 'numero', valor: 40 }, vendas: { modo: 'custo', valor: 600 }, lixo: { modo: 'x', valor: 1 },
+  } } });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body.goals['2027-03'].meta, { investimento: 6000, itens: {
+    leads: { modo: 'custo', valor: 30 }, leadsQualificados: { modo: 'taxa', valor: 40 },
+    cotacoes: { modo: 'numero', valor: 40 }, vendas: { modo: 'custo', valor: 600 },
+  } });
+  // modo que a etapa não aceita, porcentagem acima de 100 e valor negativo
+  assert.equal((await call(base, 'PUT', { meta: { itens: { leads: { modo: 'taxa', valor: 10 } } } })).status, 400);
+  assert.equal((await call(base, 'PUT', { meta: { itens: { vendas: { modo: 'taxa', valor: 120 } } } })).status, 400);
+  assert.equal((await call(base, 'PUT', { meta: { itens: { vendas: { modo: 'custo', valor: -1 } } } })).status, 400);
+  // salvar de novo no formato novo substitui (não sobra etapa antiga)
+  r = await call(base, 'PUT', { meta: { investimento: 100, itens: { vendas: { modo: 'numero', valor: 3 } } } });
+  assert.deepEqual(r.body.goals['2027-03'].meta, { investimento: 100, itens: { vendas: { modo: 'numero', valor: 3 } } });
+  await call(base, 'DELETE');
+});

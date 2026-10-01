@@ -435,7 +435,7 @@ function renderGoals() {
   const slots = goalSlots(res);
   const slot = (id) => `<span data-slot="${esc(id)}">${slots.html[id] ?? ''}</span>`;
 
-  const monthCards = Goals.ROWS.map((row) => `
+  const monthCards = res.rowDefs.map((row) => `
     <div class="card" data-tone-of="m:${row.key}">
       <div class="label">${esc(row.label)}${row.support ? ' <span class="pill">apoio</span>' : ''}</div>
       <div class="value">${slot(`m:${row.key}:real`)}</div>
@@ -452,7 +452,7 @@ function renderGoals() {
         ${d.working ? `<div class="theme">${esc(d.theme)}</div>` : `<div class="theme">${esc(d.holiday ? 'Feriado: ' + d.holiday : 'Folga')}</div>`}
         <button type="button" class="linkbtn" data-toggle-off="${d.date}">${d.working ? 'marcar folga' : 'reativar dia'}</button></th>`;
     }).join('');
-    const body = Goals.ROWS.map((row) => {
+    const body = res.rowDefs.map((row) => {
       const cells = w.days.map((d) => {
         if (!d.working) return '<td class="offcell">—</td>';
         const real = row.input
@@ -532,45 +532,79 @@ function saveGoalDay(month, date, key, raw) {
     .catch(async (err) => { alert('Não foi possível salvar: ' + err.message); state.client = await api(`/clients/${encodeURIComponent(c.id)}`); renderGoals(); });
 }
 
+// Nome de cada etapa e a etapa de que a porcentagem é tirada
+const STAGE_TEXT = {
+  leads: { unit: 'lead', base: null },
+  leadsQualificados: { unit: 'lead qualificado', base: 'dos leads' },
+  cotacoes: { unit: 'cotação', base: 'dos leads qualificados' },
+  negociacoes: { unit: 'negociação', base: 'das cotações' },
+  vendas: { unit: 'venda', base: 'das negociações' },
+};
+const stageLabel = (k) => ({ leads: 'Leads', leadsQualificados: 'Leads qualificados', cotacoes: 'Cotações', negociacoes: 'Negociações', vendas: 'Vendas' }[k]);
+const modeText = (k, modo) => (modo === 'numero' ? 'Número exato' : modo === 'taxa' ? `% ${STAGE_TEXT[k].base}` : `Custo por ${STAGE_TEXT[k].unit} (R$)`);
+const modeUnit = (modo) => (modo === 'numero' ? 'un.' : modo === 'taxa' ? '%' : 'R$');
+
 function openGoalDialog(month) {
   const c = state.client;
   const plan = goalPlan(c, month);
   const prev = goalPlan(c, shiftMonth(month, -1));
-  const meta = (plan && plan.meta) || (prev && prev.meta) || {};
-  const f = (k, label, step = 'any') => `<label>${esc(label)}<input type="number" min="0" step="${step}" name="${k}" value="${esc(meta[k] ?? '')}"></label>`;
+  const cur = Goals.normalizeMeta((plan && plan.meta) || (prev && prev.meta) || {});
+
+  const stageRow = (k) => {
+    const it = cur.itens[k];
+    return `<div class="stage-row">
+      <div class="stage-name">${esc(stageLabel(k))}</div>
+      <label class="stage-mode"><span class="sr-only">Como definir ${esc(stageLabel(k))}</span>
+        <select name="modo-${k}" data-stage="${k}">${Goals.MODES[k].map((m) => `<option value="${m}" ${it.modo === m ? 'selected' : ''}>${esc(modeText(k, m))}</option>`).join('')}</select></label>
+      <label class="stage-val"><span class="sr-only">Valor de ${esc(stageLabel(k))}</span>
+        <span class="inwrap"><input type="number" min="0" step="any" inputmode="decimal" name="val-${k}" value="${esc(it.valor ?? '')}"><span class="unit" data-unit="${k}">${esc(modeUnit(it.modo))}</span></span></label>
+      <div class="stage-eq hint" data-eq="${k}"></div>
+    </div>`;
+  };
 
   openDialog(`<form method="dialog" id="goal-form">
     <div class="dlg-head"><h3>Meta de ${esc(monthLabel(month))}</h3></div>
     <div class="dlg-body">
       ${!plan && prev ? '<div class="notice good">Valores preenchidos com a meta do mês anterior. Ajuste o que precisar.</div>' : ''}
-      <div class="form-grid">
-        ${f('investimento', 'Valor investido no mês (R$)')}
-        ${f('cpl', 'Custo por lead — teto (R$)')}
-        ${f('cplQualificado', 'Custo por lead qualificado — teto (R$)')}
-        ${f('cotacoes', 'Cotações no mês')}
-        ${f('negociacoes', 'Negociações no mês')}
-        ${f('vendas', 'Vendas no mês')}
-        <label class="full" style="flex-direction:row;align-items:center;gap:8px">
-          <input type="checkbox" name="compensarExcedente" ${plan && plan.compensarExcedente ? 'checked' : ''}>
-          Quando eu superar a meta, reduzir as metas seguintes (por padrão elas só sobem quando fico abaixo)</label>
-      </div>
-      <div class="hint" id="goal-derived"></div>
-      <p class="hint">Leads e leads qualificados necessários saem de investimento ÷ custo por lead. A meta é dividida pelos dias úteis de cada semana
-      (feriados nacionais já descontados) e se ajusta a cada lançamento de realizado.</p>
+      <div class="form-grid"><label>Valor investido no mês (R$)<input type="number" min="0" step="any" inputmode="decimal" name="investimento" value="${esc(cur.investimento ?? '')}"></label></div>
+      <p class="hint">Para cada etapa do funil, escolha como definir a meta: <b>número exato</b>, <b>porcentagem</b> da etapa anterior ou <b>custo</b> por unidade (investimento ÷ custo). Ao lado aparece o que isso equivale nas outras formas.</p>
+      <div class="stage-grid">${Goals.STAGES.map(stageRow).join('')}</div>
+      <label class="check-row"><input type="checkbox" name="compensarExcedente" ${plan && plan.compensarExcedente ? 'checked' : ''}>
+        Quando eu superar a meta, reduzir as metas seguintes (por padrão elas só sobem quando fico abaixo)</label>
+      <p class="hint">Custos por lead e por lead qualificado são tetos fixos no acompanhamento diário. Se você escolher custo por cotação, negociação ou venda, a linha de custo correspondente também aparece nas tabelas. A meta é dividida pelos dias úteis de cada semana (feriados nacionais descontados) e se ajusta a cada lançamento de realizado.</p>
       <div id="form-error" class="notice bad" hidden></div></div>
     <div class="dlg-foot">
       ${plan ? '<button type="button" class="btn btn-danger" id="del-goal">Apagar plano do mês</button>' : ''}<span style="flex:1"></span>
       <button type="button" class="btn btn-ghost" id="cancel">Cancelar</button>
       <button type="submit" class="btn">Salvar</button></div></form>`);
 
-  const derived = () => {
-    const v = (k) => Number($('#goal-form').elements[k].value) || 0;
-    const inv = v('investimento'), cpl = v('cpl'), cplq = v('cplQualificado');
-    $('#goal-derived').textContent = inv && (cpl || cplq)
-      ? `Isso pede ${cpl ? fmt.dec(inv / cpl) + ' leads' : '—'} e ${cplq ? fmt.dec(inv / cplq) + ' leads qualificados' : '—'} no mês.` : '';
+  const form = $('#goal-form');
+  const readMeta = () => {
+    const meta = { investimento: form.elements.investimento.value === '' ? null : Number(form.elements.investimento.value), itens: {} };
+    for (const k of Goals.STAGES) {
+      const raw = form.elements['val-' + k].value;
+      meta.itens[k] = { modo: form.elements['modo-' + k].value, valor: raw === '' ? null : Number(raw) };
+    }
+    return meta;
   };
-  $('#goal-form').oninput = derived;
-  derived();
+  const preview = () => {
+    const meta = readMeta();
+    const { info } = Goals.resolveTargets(meta);
+    for (const k of Goals.STAGES) {
+      const i = info[k];
+      $(`[data-unit="${k}"]`).textContent = modeUnit(i.modo);
+      const parts = [];
+      if (i.total != null) parts.push(`${fmt.dec(i.total)} no mês`);
+      if (i.modo !== 'custo' && i.custo != null) parts.push(`${fmt.brl(i.custo)} por ${STAGE_TEXT[k].unit}`);
+      if (i.modo !== 'taxa' && i.taxa != null) parts.push(`${fmt.dec(i.taxa)}% ${STAGE_TEXT[k].base}`);
+      const needBase = i.modo === 'taxa' && i.total == null && meta.itens[k].valor != null;
+      const needInv = i.modo === 'custo' && i.total == null && meta.itens[k].valor != null;
+      $(`[data-eq="${k}"]`).textContent = needBase ? 'Defina a etapa anterior para calcular.' : needInv ? 'Informe o valor investido para calcular.' : parts.join(' · ');
+    }
+  };
+  form.oninput = preview;
+  form.onchange = preview;
+  preview();
   $('#cancel').onclick = closeDialog;
   const del = $('#del-goal');
   if (del) del.onclick = async () => {
@@ -578,11 +612,9 @@ function openGoalDialog(month) {
     state.client = await api(`/clients/${encodeURIComponent(c.id)}/goals/${month}`, { method: 'DELETE' });
     closeDialog(); renderGoals();
   };
-  $('#goal-form').onsubmit = async (e) => {
+  form.onsubmit = async (e) => {
     e.preventDefault();
-    const fd = new FormData(e.target);
-    const body = { meta: {}, compensarExcedente: fd.has('compensarExcedente') };
-    for (const k of Goals.META_FIELDS) body.meta[k] = fd.get(k);
+    const body = { meta: readMeta(), compensarExcedente: form.elements.compensarExcedente.checked };
     try {
       state.client = await api(`/clients/${encodeURIComponent(c.id)}/goals/${month}`, { method: 'PUT', body });
       closeDialog(); renderGoals();

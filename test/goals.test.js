@@ -150,3 +150,101 @@ test('datas inválidas são rejeitadas', () => {
   assert.equal(Goals.isRealDate('2027-02-30'), false);
   assert.equal(Goals.isRealDate('28/02/2027'), false);
 });
+
+// ---------- meta por número exato, porcentagem ou custo ----------
+const nova = (itens, extra = {}) => ({ meta: { investimento: 6000, itens }, naoUteis: [], days: {}, ...extra });
+
+test('formato antigo continua valendo (cpl, cplQualificado, números)', () => {
+  const { targets, info } = Goals.resolveTargets({ investimento: 4000, cpl: 20, cplQualificado: 50, cotacoes: 40, negociacoes: 20, vendas: 10 });
+  assert.equal(targets.leads, 200);
+  assert.equal(targets.leadsQualificados, 80);
+  assert.equal(targets.vendas, 10);
+  assert.equal(info.leads.modo, 'custo');
+  assert.equal(info.vendas.modo, 'numero');
+});
+
+test('custo: meta = investimento ÷ custo por unidade', () => {
+  const { targets, info } = Goals.resolveTargets(nova({
+    leads: { modo: 'custo', valor: 30 }, vendas: { modo: 'custo', valor: 300 },
+  }).meta);
+  assert.equal(targets.leads, 200);
+  assert.equal(targets.vendas, 20);
+  assert.equal(info.vendas.custo, 300);
+});
+
+test('porcentagem: cada etapa é % da etapa anterior que tem meta', () => {
+  const { targets, info } = Goals.resolveTargets(nova({
+    leads: { modo: 'numero', valor: 200 },
+    leadsQualificados: { modo: 'taxa', valor: 40 },   // 80
+    cotacoes: { modo: 'taxa', valor: 50 },            // 40
+    negociacoes: { modo: 'taxa', valor: 50 },         // 20
+    vendas: { modo: 'taxa', valor: 25 },              // 5
+  }).meta);
+  assert.deepEqual([targets.leads, targets.leadsQualificados, targets.cotacoes, targets.negociacoes, targets.vendas], [200, 80, 40, 20, 5]);
+  near(info.vendas.custo, 1200); // 6000 ÷ 5 vendas: equivalência mostrada mesmo sem ter escolhido custo
+  near(info.vendas.taxa, 25);
+});
+
+test('porcentagem pula etapa sem meta e usa a anterior que tem', () => {
+  const { targets } = Goals.resolveTargets(nova({
+    leads: { modo: 'numero', valor: 200 },
+    leadsQualificados: { modo: 'numero', valor: null },
+    cotacoes: { modo: 'taxa', valor: 20 },
+  }).meta);
+  assert.equal(targets.leadsQualificados, null);
+  assert.equal(targets.cotacoes, 40); // 20% dos 200 leads
+});
+
+test('porcentagem sem etapa anterior definida não inventa meta', () => {
+  const { targets } = Goals.resolveTargets(nova({ vendas: { modo: 'taxa', valor: 10 } }).meta);
+  assert.equal(targets.vendas, null);
+});
+
+test('custo sem investimento não inventa meta', () => {
+  const { targets } = Goals.resolveTargets({ itens: { vendas: { modo: 'custo', valor: 300 } } });
+  assert.equal(targets.vendas, null);
+});
+
+test('modo inválido para a etapa cai no padrão da etapa', () => {
+  const n = Goals.normalizeMeta({ investimento: 100, itens: { leads: { modo: 'taxa', valor: 5 } } });
+  assert.equal(n.itens.leads.modo, 'custo'); // leads não tem "taxa"
+});
+
+test('compute usa as metas resolvidas e mostra linha de custo só quando o modo é custo', () => {
+  const r = Goals.compute(FEV, nova({
+    leads: { modo: 'numero', valor: 200 },
+    leadsQualificados: { modo: 'taxa', valor: 40 },
+    cotacoes: { modo: 'numero', valor: 40 },
+    negociacoes: { modo: 'numero', valor: 20 },
+    vendas: { modo: 'custo', valor: 600 },
+  }), '2027-02-01');
+  near(r.rows.vendas.meta, 10);               // 6000 ÷ 600
+  near(r.rows.leadsQualificados.meta, 80);
+  const keys = r.rowDefs.map((d) => d.key);
+  assert.ok(keys.includes('custoVenda'));
+  assert.ok(!keys.includes('custoCotacao'));
+  assert.ok(!keys.includes('custoNegociacao'));
+  assert.equal(r.rows.custoVenda.meta, 600);  // teto em todos os níveis
+  assert.equal(day(0, 1, r).rows.custoVenda.meta, 600);
+  // CPL implícito quando leads foi definido por número: 6000 ÷ 200
+  assert.equal(r.rows.cpl.meta, 30);
+});
+
+test('custo por venda realizado = investimento ÷ vendas do período e vira bom/ruim contra o teto', () => {
+  const days = { '2027-02-01': { investimento: 1000, vendas: 2 }, '2027-02-02': { investimento: 1000, vendas: 1 } };
+  const r = Goals.compute(FEV, nova({ vendas: { modo: 'custo', valor: 600 } }, { days }), '2027-02-03');
+  assert.equal(day(0, 0, r).rows.custoVenda.realizado, 500);
+  assert.equal(day(0, 0, r).rows.custoVenda.tone, 'good');
+  near(day(0, 1, r).rows.custoVenda.realizado, 1000);
+  assert.equal(day(0, 1, r).rows.custoVenda.tone, 'bad');
+  near(r.rows.custoVenda.realizado, 2000 / 3);
+  assert.equal(r.rows.custoVenda.tone, 'warn'); // 666,67 ≤ 600 × 1,2
+});
+
+test('meta definida por % também compensa dia/semana como qualquer outra', () => {
+  const g = nova({ leads: { modo: 'numero', valor: 400 }, vendas: { modo: 'taxa', valor: 5 } }, // 20 vendas no mês, 1 por dia útil
+    { days: { '2027-02-01': { vendas: 0 } } });
+  const r = Goals.compute(FEV, g, '2027-02-02');
+  near(day(0, 0, r).rows.vendas.base, 1);
+  near(day(0, 1, r).rows.vendas.meta, 5 / 4); // semana 5 vendas, nenhuma no dia 01 → 1,25 por dia nos 4 restantes
+});
