@@ -1,0 +1,390 @@
+'use strict';
+
+// ---------- utilidades ----------
+const $ = (sel) => document.querySelector(sel);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+const nfInt = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
+const nfDec = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 });
+const nfBrl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+const fmt = {
+  int: (v) => nfInt.format(v),
+  dec: (v) => nfDec.format(v),
+  brl: (v) => nfBrl.format(v),
+  pct: (v) => nfDec.format(v) + '%',
+  x: (v) => nfDec.format(v).replace(/\.0$/, '') + 'x',
+  dias: (v) => nfInt.format(v) + (v === 1 ? ' dia' : ' dias'),
+  meses: (v) => nfDec.format(v) + (Math.round(v * 10) / 10 === 1 ? ' mês' : ' meses'),
+  nps: (v) => (v > 0 ? '+' : '') + nfDec.format(v),
+};
+const show = (v, f) => (v == null ? null : fmt[f](v));
+
+const MONTH_NAMES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+const monthLabel = (k) => `${MONTH_NAMES[Number(k.slice(5, 7)) - 1]}/${k.slice(2, 4)}`;
+const currentMonth = () => new Date().toISOString().slice(0, 7);
+
+async function api(path, opts = {}) {
+  const res = await fetch('/api' + path, {
+    method: opts.method || 'GET',
+    headers: opts.body ? { 'Content-Type': 'application/json' } : undefined,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Erro ${res.status}`);
+  return data;
+}
+
+// ---------- estado ----------
+const state = { clients: [], client: null, period: null };
+
+// ---------- roteamento: #/<cliente>/<aba> ----------
+function parseRoute() {
+  const [, id, tab] = location.hash.split('/');
+  return { id: id || null, tab: tab === 'monday' ? 'monday' : 'metricas' };
+}
+
+async function render() {
+  const route = parseRoute();
+  state.clients = await api('/clients');
+  if (!route.id && state.clients.length) { location.hash = `#/${state.clients[0].id}/metricas`; return; }
+
+  $('#client-list').innerHTML = state.clients.map((c) =>
+    `<a href="#/${esc(c.id)}/metricas" ${c.id === route.id ? 'aria-current="page"' : ''}>${esc(c.name)}</a>`).join('');
+
+  if (!route.id) { $('#main').innerHTML = '<div class="empty-state">Nenhum cliente ainda. Clique em “Novo cliente”.</div>'; return; }
+
+  try {
+    if (!state.client || state.client.id !== route.id) state.period = null;
+    state.client = await api(`/clients/${encodeURIComponent(route.id)}`);
+  } catch (err) {
+    $('#main').innerHTML = `<div class="notice bad">${esc(err.message)}</div>`; return;
+  }
+  const c = state.client;
+
+  $('#main').innerHTML = `
+    <div class="page-head">
+      <div><h1>${esc(c.name)}</h1><div class="sub">${esc(c.segment || '')}</div></div>
+    </div>
+    <div class="tabs" role="tablist">
+      <a href="#/${esc(c.id)}/metricas" ${route.tab === 'metricas' ? 'aria-current="page"' : ''}>Métricas do Projeto</a>
+      <a href="#/${esc(c.id)}/monday" ${route.tab === 'monday' ? 'aria-current="page"' : ''}>Entrada de Clientes (Monday)</a>
+    </div>
+    <div id="tab"></div>`;
+
+  if (route.tab === 'metricas') renderMetrics(); else renderMonday();
+}
+
+// ---------- aba: Métricas ----------
+function monthOptions(c) {
+  const keys = new Set(Object.keys(c.months));
+  keys.add(currentMonth());
+  return [...keys].sort().reverse();
+}
+
+function renderMetrics() {
+  const c = state.client;
+  const opts = monthOptions(c);
+  if (!state.period) {
+    const withData = Object.keys(c.months).sort().reverse()[0];
+    state.period = withData || currentMonth();
+  }
+  const keys = state.period === 'all' ? Object.keys(c.months).sort() : [state.period];
+  const m = Metrics.compute(c, keys);
+  const hasData = keys.some((k) => c.months[k] && Object.values(c.months[k]).some((v) => v != null && v !== ''));
+
+  const card = (label, value, f, note, cls = '') => {
+    const v = show(value, f);
+    return `<div class="card ${cls}"><div class="label">${esc(label)}</div>
+      <div class="value ${v == null ? 'empty' : ''}">${v == null ? '—' : esc(v)}</div>
+      ${note ? `<div class="note">${note}</div>` : ''}</div>`;
+  };
+  const ofLeads = (v) => (v != null && m.leads ? `${fmt.pct((v / m.leads) * 100)} dos leads` : '');
+
+  const bandCls = { 'Saudável': 'good', 'Atenção': 'warn', 'Risco': 'bad' }[m.healthBand] || '';
+  const ansCls = { Baixo: 'good', 'Médio': 'warn', Alto: 'bad' }[m.nivelAnsiedade] || '';
+  const mondayHint = c.project.contractDate || c.project.startDate ? '' : ' Preencha as datas em “Dados do projeto”.';
+
+  $('#tab').innerHTML = `
+    <div class="toolbar">
+      <label>Período
+        <select id="period">
+          <option value="all" ${state.period === 'all' ? 'selected' : ''}>Acumulado</option>
+          ${opts.map((k) => `<option value="${k}" ${state.period === k ? 'selected' : ''}>${monthLabel(k)}</option>`).join('')}
+        </select>
+      </label>
+      <span class="spacer"></span>
+      <button class="btn btn-ghost" id="edit-project">Dados do projeto</button>
+      <button class="btn" id="edit-month">Registrar dados do mês</button>
+    </div>
+    ${hasData ? '' : `<div class="notice warn">Ainda não há dados neste período. Use “Registrar dados do mês” para lançar os números.${esc(mondayHint)}</div>`}
+
+    <h2 class="section">Métricas de resultado do cliente</h2>
+    <div class="grid">
+      ${card('Investimento no Meta', m.investimento, 'brl')}
+      ${card('Leads', m.leads, 'int')}
+      ${card('Custo por lead (CPL)', m.cpl, 'brl')}
+      ${card('Leads qualificados', m.leadsQualificados, 'int', ofLeads(m.leadsQualificados))}
+      ${card('Custo por lead qualificado', m.cplQualificado, 'brl')}
+      ${card('Responderam o 1º contato', m.leadsResponderam, 'int', ofLeads(m.leadsResponderam))}
+      ${card('Cotações enviadas', m.cotacoes, 'int', ofLeads(m.cotacoes))}
+      ${card('Pararam de responder (pós 7 dias de follow-up)', m.pararamResponder, 'int')}
+      ${card('Em negociação', m.negociacoes, 'int')}
+      ${card('Vendas', m.vendas, 'int', ofLeads(m.vendas))}
+      ${card('Ticket médio', m.ticketMedio, 'brl', m.receita != null ? `Receita gerada: ${esc(fmt.brl(m.receita))}` : '')}
+      ${card('ROAS', m.roas, 'x', 'Receita ÷ investimento no Meta')}
+      ${card('CAC', m.cac, 'brl', c.project.cacIncludesFee === false ? 'Investimento ÷ vendas' : '(Investimento + mensalidade) ÷ vendas')}
+    </div>
+
+    <h2 class="section">Funil comercial</h2>
+    <div class="panel">${funnelHtml(m)}</div>
+
+    <h2 class="section">Métricas de gestão</h2>
+    <div class="grid">
+      ${card('Tempo de projeto', m.tempoProjetoMeses, 'meses', c.project.startDate ? `Desde ${esc(c.project.startDate.split('-').reverse().join('/'))}` : 'Informe o início em “Dados do projeto”')}
+      ${card('Taxa de inadimplência', m.taxaInadimplencia, 'pct', 'Inadimplente ÷ faturado')}
+      ${card('MRR', m.mrr, 'brl')}
+      ${card('Time to Value: contrato → campanhas no ar', m.timeToValueCampanhaDias, 'dias')}
+      ${card('Time to Value: campanhas → 1ª venda', m.timeToValuePrimeiraVendaDias, 'dias',
+        m.timeToValueContratoPrimeiraVendaDias != null ? `Contrato → 1ª venda: ${esc(fmt.dias(m.timeToValueContratoPrimeiraVendaDias))}` : '')}
+      ${card('NPS', m.nps, 'nps', state.period === 'all' ? 'Média dos meses informados' : 'No mês')}
+      <div class="card"><div class="label">Health Score</div>
+        <div class="value ${m.healthScore == null ? 'empty' : ''}">${m.healthScore == null ? '—' : esc(m.healthScore)}
+          ${m.healthBand ? `<span class="pill ${bandCls}">${esc(m.healthBand)}</span>` : ''}</div>
+        <div class="note">${healthNote(m)}</div></div>
+      ${card('Índice de reclamação', m.indiceReclamacao, 'pct', 'Reclamações ÷ contatos do cliente')}
+      <div class="card"><div class="label">Reuniões de alinhamento</div>
+        <div class="value ${m.reunioesRealizadas == null ? 'empty' : ''}">${m.reunioesRealizadas == null ? '—' : esc(fmt.int(m.reunioesRealizadas)) + (m.reunioesPlanejadas != null ? ` / ${esc(fmt.int(m.reunioesPlanejadas))}` : '')}</div>
+        <div class="note">${m.aderenciaReunioes != null ? `Aderência: ${esc(fmt.pct(m.aderenciaReunioes * 100))}` : 'Realizadas / planejadas'}</div></div>
+      <div class="card"><div class="label">Alinhamento de expectativa (ansiedade)</div>
+        <div class="value ${m.nivelAnsiedade == null ? 'empty' : ''}">${m.nivelAnsiedade == null ? '—' : `<span class="pill ${ansCls}">${esc(m.nivelAnsiedade)}</span>`}</div>
+        <div class="note">${m.contatosEspontaneosSemana != null ? `${esc(fmt.dec(m.contatosEspontaneosSemana))} contatos espontâneos/semana` : 'Contatos fora do horário ou cobrando venda'}</div></div>
+      ${card('Dinheiro coletado', m.dinheiroColetado, 'brl')}
+    </div>
+
+    <h2 class="section">Evolução mensal</h2>
+    ${trendHtml(c)}
+  `;
+
+  $('#period').onchange = (e) => { state.period = e.target.value; renderMetrics(); };
+  $('#edit-month').onclick = () => openMonthDialog(state.period === 'all' ? currentMonth() : state.period);
+  $('#edit-project').onclick = openProjectDialog;
+}
+
+function healthNote(m) {
+  if (m.healthScore == null) return 'Calculado com NPS, ROAS vs meta, inadimplência, ansiedade, reuniões e reclamações';
+  if (m.healthScoreManual) return 'Valor informado manualmente';
+  return 'Calculado: ' + m.healthScoreAuto.parts.map((p) => esc(p.key)).join(', ');
+}
+
+function funnelHtml(m) {
+  const max = Math.max(...m.funil.map((s) => s.value || 0), 0);
+  if (!max) return '<div class="empty-state">Sem dados de funil neste período.</div>';
+  const rows = m.funil.map((s) => `
+    <div class="funnel-row">
+      <div>${esc(s.label)}</div>
+      <div class="funnel-bar" role="img" aria-label="${esc(s.label)}: ${s.value ?? 0}"><div style="width:${max ? ((s.value || 0) / max) * 100 : 0}%"></div></div>
+      <div class="nums"><b>${s.value == null ? '—' : esc(fmt.int(s.value))}</b>
+        ${s.pctOfLeads != null && s.label !== 'Leads' ? ` · ${esc(fmt.pct(s.pctOfLeads * 100))} dos leads` : ''}</div>
+    </div>`).join('');
+  const lost = m.pararamResponder != null
+    ? `<div class="lost">${esc(fmt.int(m.pararamResponder))} lead(s) pararam de responder após o envio da cotação e 7 dias de follow-up${m.cotacoes ? ` (${esc(fmt.pct((m.pararamResponder / m.cotacoes) * 100))} das cotações)` : ''}.</div>` : '';
+  return rows + lost;
+}
+
+function trendHtml(c) {
+  const rows = Metrics.series(c);
+  if (!rows.length) return '<div class="panel empty-state">A evolução aparece aqui depois do primeiro lançamento mensal.</div>';
+  const cell = (v, f) => (v == null ? '—' : esc(fmt[f](v)));
+  const table = `<div class="panel scroll"><table class="data"><thead><tr>
+    <th>Mês</th><th>Investimento</th><th>Leads</th><th>CPL</th><th>Qualificados</th><th>Vendas</th><th>Receita</th><th>ROAS</th><th>CAC</th><th>NPS</th><th>Health</th>
+    </tr></thead><tbody>${rows.map((r) => `<tr>
+    <td>${esc(monthLabel(r.month))}</td><td>${cell(r.investimento, 'brl')}</td><td>${cell(r.leads, 'int')}</td><td>${cell(r.cpl, 'brl')}</td>
+    <td>${cell(r.leadsQualificados, 'int')}</td><td>${cell(r.vendas, 'int')}</td><td>${cell(r.receita, 'brl')}</td>
+    <td>${cell(r.roas, 'x')}</td><td>${cell(r.cac, 'brl')}</td><td>${cell(r.nps, 'nps')}</td><td>${cell(r.healthScore, 'int')}</td>
+    </tr>`).join('')}</tbody></table></div>`;
+  return chartHtml(rows) + table;
+}
+
+// Barras agrupadas: investimento x receita por mês
+function chartHtml(rows) {
+  const data = rows.filter((r) => r.investimento != null || r.receita != null);
+  if (!data.length) return '';
+  const W = 720, H = 220, padL = 92, padB = 28, padT = 16;
+  const max = Math.max(...data.flatMap((r) => [r.investimento || 0, r.receita || 0]), 1);
+  const slot = (W - padL - 10) / data.length;
+  const bw = Math.min(28, slot / 3);
+  const y = (v) => padT + (H - padT - padB) * (1 - v / max);
+  const bars = data.map((r, i) => {
+    const x0 = padL + slot * i + slot / 2;
+    const bar = (v, dx, cls, label) => v == null ? '' :
+      `<rect x="${x0 + dx}" y="${y(v)}" width="${bw}" height="${H - padB - y(v)}" rx="3" fill="var(${cls})"><title>${esc(label)}: ${esc(fmt.brl(v))}</title></rect>`;
+    return bar(r.investimento, -bw - 1, '--bar-2', 'Investimento') + bar(r.receita, 1, '--bar', 'Receita') +
+      `<text x="${x0}" y="${H - 8}" text-anchor="middle">${esc(monthLabel(r.month))}</text>`;
+  }).join('');
+  return `<div class="panel" style="margin-bottom:12px"><svg class="chart" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Investimento e receita por mês">
+    <line x1="${padL}" y1="${H - padB}" x2="${W - 10}" y2="${H - padB}" stroke="var(--border)"/>
+    <text x="${padL - 6}" y="${padT + 4}" text-anchor="end">${esc(fmt.brl(max))}</text>
+    <text x="${padL - 6}" y="${H - padB}" text-anchor="end">R$ 0</text>${bars}</svg>
+    <div class="hint"><span style="color:var(--bar-2)">■</span> Investimento no Meta &nbsp; <span style="color:var(--bar)">■</span> Receita gerada em vendas</div></div>`;
+}
+
+// ---------- aba: Monday ----------
+function renderMonday() {
+  const c = state.client;
+  const cfg = c.monday || {};
+  const snap = cfg.snapshot;
+  const p = c.project;
+  const fmtDate = (d) => (d ? d.split('-').reverse().join('/') : null);
+  $('#tab').innerHTML = `
+    ${c.mondayConfigured ? '' : `<div class="notice warn">O servidor não tem <code>MONDAY_API_TOKEN</code> configurado, então a sincronização está desligada. Veja o README.</div>`}
+    ${cfg.error ? `<div class="notice bad">Última sincronização falhou: ${esc(cfg.error)}</div>` : ''}
+    <div class="toolbar">
+      <div><b>Quadro:</b> ${esc(cfg.boardName || 'Entrada de Clientes')} · <b>Item:</b> ${esc(cfg.itemName || c.name)}
+        ${cfg.syncedAt ? `<div class="hint">Última tentativa: ${esc(new Date(cfg.syncedAt).toLocaleString('pt-BR'))}</div>` : ''}</div>
+      <span class="spacer"></span>
+      <button class="btn" id="sync" ${c.mondayConfigured ? '' : 'disabled'}>Sincronizar com o Monday</button>
+    </div>
+    <div id="sync-result"></div>
+    <h2 class="section">Dados do projeto usados nas métricas</h2>
+    <div class="panel"><dl class="kv">
+      <dt>Início do projeto</dt><dd>${esc(fmtDate(p.startDate) || '—')}</dd>
+      <dt>Assinatura do contrato</dt><dd>${esc(fmtDate(p.contractDate) || '—')}</dd>
+      <dt>Início das campanhas</dt><dd>${esc(fmtDate(p.campaignStartDate) || '—')}</dd>
+      <dt>Primeira venda</dt><dd>${esc(fmtDate(p.firstSaleDate) || '—')}</dd>
+      <dt>MRR</dt><dd>${p.mrr != null ? esc(fmt.brl(p.mrr)) : '—'}</dd>
+    </dl></div>
+    <h2 class="section">Dados do cliente no Monday</h2>
+    <div class="panel">${snap
+      ? `<dl class="kv">${snap.fields.map((f) => `<dt>${esc(f.title)}</dt><dd>${esc(f.text)}</dd>`).join('')}</dl>`
+      : '<div class="empty-state">Ainda não sincronizado.</div>'}</div>`;
+
+  $('#sync').onclick = async (e) => {
+    e.target.disabled = true; e.target.textContent = 'Sincronizando…';
+    try {
+      const r = await api(`/clients/${encodeURIComponent(c.id)}/monday/sync`, { method: 'POST' });
+      state.client = r.client;
+      await render();
+      $('#sync-result').innerHTML = `<div class="notice good">Sincronizado. ${r.applied.length
+        ? 'Campos preenchidos: ' + r.applied.map((a) => esc(`${a.key} (de “${a.from}”)`)).join(', ') + '.'
+        : 'Nenhum campo novo foi preenchido automaticamente — ajuste em “Dados do projeto” se precisar.'}</div>`;
+    } catch (err) {
+      await render();
+    }
+  };
+}
+
+// ---------- diálogos ----------
+const dlg = () => $('#dialog');
+function openDialog(html) { dlg().innerHTML = html; dlg().showModal(); }
+function closeDialog() { dlg().close(); }
+
+const MONTH_FIELDS = [
+  ['Resultado — funil e investimento', [
+    ['investimento', 'Investimento no Meta (R$)'], ['leads', 'Leads'], ['leadsQualificados', 'Leads qualificados'],
+    ['leadsResponderam', 'Leads que responderam o 1º contato'], ['cotacoes', 'Cotações enviadas'],
+    ['pararamResponder', 'Pararam de responder (pós envio + 7 dias de follow-up)'], ['negociacoes', 'Em negociação'],
+    ['vendas', 'Vendas'], ['receita', 'Receita gerada em vendas (R$)'],
+  ]],
+  ['Gestão — financeiro', [
+    ['mrr', 'MRR do mês (R$)'], ['faturado', 'Valor faturado (R$)'], ['inadimplente', 'Valor inadimplente (R$)'],
+    ['dinheiroColetado', 'Dinheiro coletado (R$)'],
+  ]],
+  ['Gestão — relacionamento', [
+    ['nps', 'NPS do mês (-100 a 100)'], ['healthScore', 'Health Score manual (0-100, opcional)'],
+    ['reclamacoes', 'Reclamações no mês'], ['contatosCliente', 'Total de contatos do cliente no mês'],
+    ['reunioesRealizadas', 'Reuniões de alinhamento realizadas'], ['reunioesPlanejadas', 'Reuniões planejadas'],
+    ['contatosEspontaneos', 'Contatos espontâneos (fora do horário / cobrando venda)'],
+  ]],
+];
+
+function openMonthDialog(month) {
+  const c = state.client;
+  const fieldsHtml = (values) => MONTH_FIELDS.map(([title, fields]) => `
+    <fieldset><legend>${esc(title)}</legend><div class="form-grid">
+      ${fields.map(([k, label]) => `<label>${esc(label)}<input type="number" step="any" name="${k}" value="${esc(values[k] ?? '')}"></label>`).join('')}
+    </div></fieldset>`).join('') +
+    `<fieldset><legend>Observações</legend><textarea name="observacoes" rows="3" style="width:100%">${esc(values.observacoes || '')}</textarea></fieldset>`;
+
+  openDialog(`<form method="dialog" id="month-form">
+    <div class="dlg-head"><h3>Registrar dados do mês</h3>
+      <input type="month" id="month-pick" value="${esc(month)}" required></div>
+    <div class="dlg-body"><div id="month-fields">${fieldsHtml(c.months[month] || {})}</div>
+      <p class="hint">Deixe em branco o que ainda não tem. CPL, ROAS, CAC, ticket médio e as taxas são calculados automaticamente.</p>
+      <div id="form-error" class="notice bad" hidden></div></div>
+    <div class="dlg-foot">
+      <button type="button" class="btn btn-danger" id="del-month">Apagar mês</button><span style="flex:1"></span>
+      <button type="button" class="btn btn-ghost" id="cancel">Cancelar</button>
+      <button type="submit" class="btn">Salvar</button></div></form>`);
+
+  $('#month-pick').onchange = (e) => { $('#month-fields').innerHTML = fieldsHtml(c.months[e.target.value] || {}); };
+  $('#cancel').onclick = closeDialog;
+  $('#del-month').onclick = async () => {
+    const mk = $('#month-pick').value;
+    if (!mk || !c.months[mk] || !confirm(`Apagar todos os dados de ${monthLabel(mk)}?`)) return;
+    await api(`/clients/${encodeURIComponent(c.id)}/months/${mk}`, { method: 'DELETE' });
+    closeDialog(); state.period = null; await render();
+  };
+  $('#month-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const mk = $('#month-pick').value;
+    if (!mk) return;
+    const body = Object.fromEntries(new FormData(e.target).entries());
+    try {
+      await api(`/clients/${encodeURIComponent(c.id)}/months/${mk}`, { method: 'PUT', body });
+      closeDialog(); state.period = mk; await render();
+    } catch (err) { const box = $('#form-error'); box.hidden = false; box.textContent = err.message; }
+  };
+}
+
+function openProjectDialog() {
+  const p = state.client.project;
+  const date = (k, label) => `<label>${label}<input type="date" name="${k}" value="${esc(p[k] ?? '')}"></label>`;
+  openDialog(`<form method="dialog" id="project-form">
+    <div class="dlg-head"><h3>Dados do projeto</h3></div>
+    <div class="dlg-body"><div class="form-grid">
+      ${date('startDate', 'Início do projeto')}${date('contractDate', 'Assinatura do contrato')}
+      ${date('campaignStartDate', 'Início das campanhas')}${date('firstSaleDate', 'Primeira venda')}
+      <label>MRR padrão (R$)<input type="number" step="any" name="mrr" value="${esc(p.mrr ?? '')}"></label>
+      <label>Meta de ROAS (para o Health Score)<input type="number" step="any" name="roasTarget" value="${esc(p.roasTarget ?? '')}"></label>
+      <label class="full" style="flex-direction:row;align-items:center;gap:8px">
+        <input type="checkbox" name="cacIncludesFee" ${p.cacIncludesFee === false ? '' : 'checked'}>
+        Incluir a mensalidade da agência (MRR) no cálculo do CAC</label>
+    </div>
+    <p class="hint">Se o Monday estiver sincronizado, as datas e o MRR encontrados lá preenchem os campos vazios.</p>
+    <div id="form-error" class="notice bad" hidden></div></div>
+    <div class="dlg-foot"><button type="button" class="btn btn-ghost" id="cancel">Cancelar</button>
+      <button type="submit" class="btn">Salvar</button></div></form>`);
+  $('#cancel').onclick = closeDialog;
+  $('#project-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const body = Object.fromEntries(fd.entries());
+    body.cacIncludesFee = fd.has('cacIncludesFee');
+    try {
+      await api(`/clients/${encodeURIComponent(state.client.id)}/project`, { method: 'PUT', body });
+      closeDialog(); await render();
+    } catch (err) { const box = $('#form-error'); box.hidden = false; box.textContent = err.message; }
+  };
+}
+
+$('#add-client').onclick = () => {
+  openDialog(`<form method="dialog" id="client-form">
+    <div class="dlg-head"><h3>Novo cliente</h3></div>
+    <div class="dlg-body"><div class="form-grid">
+      <label class="full">Nome (igual ao item no Monday)<input name="name" required></label>
+      <label class="full">Segmento<input name="segment"></label></div>
+      <div id="form-error" class="notice bad" hidden></div></div>
+    <div class="dlg-foot"><button type="button" class="btn btn-ghost" id="cancel">Cancelar</button>
+      <button type="submit" class="btn">Criar</button></div></form>`);
+  $('#cancel').onclick = closeDialog;
+  $('#client-form').onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const created = await api('/clients', { method: 'POST', body: Object.fromEntries(new FormData(e.target).entries()) });
+      closeDialog(); location.hash = `#/${created.id}/metricas`;
+    } catch (err) { const box = $('#form-error'); box.hidden = false; box.textContent = err.message; }
+  };
+};
+
+window.addEventListener('hashchange', render);
+render();

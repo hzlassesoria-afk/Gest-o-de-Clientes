@@ -1,0 +1,23 @@
+{
+  "clients": [
+    {
+      "id": "petra-seguros",
+      "name": "Petra Seguros",
+      "segment": "Corretora de seguros",
+      "project": {
+        "startDate": null,
+        "contractDate": null,
+        "campaignStartDate": null,
+        "firstSaleDate": null,
+        "mrr": null,
+        "roasTarget": null,
+        "cacIncludesFee": true
+      },
+      "months": {},
+      "monday": {
+        "boardName": "Entrada de Clientes",
+        "itemName": "Petra Seguros"
+      }
+    }
+  ]
+}

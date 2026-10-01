@@ -1,0 +1,11 @@
+{
+  "name": "gestao-de-clientes",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Gestão de clientes da agência: uma página por cliente com métricas de resultado e de gestão",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "engines": { "node": ">=18" }
+}
