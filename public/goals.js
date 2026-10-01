@@ -154,7 +154,7 @@
       if (it && MODES[k].includes(it.modo)) itens[k] = { modo: it.modo, valor: num(it.valor) };
       else itens[k] = { modo: DEFAULT_MODE[k], valor: num(m[LEGACY_KEY[k]]) };
     }
-    return { investimento: num(m.investimento), itens };
+    return { investimento: num(m.investimento), faturamento: num(m.faturamento), ticketVenda: num(m.ticketVenda), itens };
   }
 
   /**
@@ -220,6 +220,43 @@
     const itens = { leads: { modo: 'custo', valor: c } };
     steps.forEach((k, i) => { itens[k] = { modo: 'taxa', valor: rates[i] }; });
     return { investimento, totais, meta: { investimento, itens } };
+  }
+
+  /**
+   * Da meta de FATURAMENTO ao investimento: faturamento = volume vendido × comissão (% do volume);
+   * vendas = volume ÷ valor médio por venda (arredondado para cima); depois o mesmo caminho de planFromSales.
+   * Devolve { investimento, totais, meta, volume, vendas, comissaoPct } ou null se faltar dado.
+   */
+  function planFromRevenue({ faturamento, ticketVenda, comissaoPct, taxas, cpl }) {
+    const F = num(faturamento), T = num(ticketVenda), p = num(comissaoPct);
+    if (!F || F <= 0 || !T || T <= 0 || !p || p <= 0) return null;
+    const volume = F / (p / 100);
+    const vendas = Math.max(1, ceilInt(volume / T));
+    const plan = planFromSales({ vendas, taxas, cpl });
+    if (!plan) return null;
+    plan.meta.faturamento = F;
+    plan.meta.ticketVenda = T;
+    return { ...plan, volume, vendas, comissaoPct: p };
+  }
+
+  /**
+   * Cenários de investimento da meta de faturamento salva, um por ponta da faixa de comissão
+   * (`comissao` = { min, max } em %). Só existe quando a meta tem faturamento e valor médio por venda,
+   * custo por lead e as taxas entre as etapas. Comissão maior = menos volume = menos investimento.
+   */
+  function revenueScenarios(meta, comissao) {
+    const n = normalizeMeta(meta);
+    if (!n.faturamento || !n.ticketVenda) return null;
+    const leads = n.itens.leads;
+    if (leads.modo !== 'custo' || leads.valor == null) return null;
+    const taxas = {};
+    for (const k of STAGES.slice(1)) {
+      if (n.itens[k].modo !== 'taxa') return null;
+      taxas[k] = n.itens[k].valor;
+    }
+    const mk = (pct) => planFromRevenue({ faturamento: n.faturamento, ticketVenda: n.ticketVenda, comissaoPct: pct, taxas, cpl: leads.valor });
+    const out = { max: mk(comissao.max), min: mk(comissao.min) };
+    return out.max && out.min ? out : null;
   }
 
   /**
@@ -457,6 +494,6 @@
 
   return {
     META_FIELDS, DAY_FIELDS, ROWS, STAGES, MODES, MODE_LABEL, DEFAULT_MODE, DAY_THEME, WEEKDAY_SHORT,
-    compute, calendar, holidays, defaultOffDays, normalizeMeta, resolveTargets, planFromSales, investmentNeeded, isRealDate, todayISO, daysInMonth,
+    compute, calendar, holidays, defaultOffDays, normalizeMeta, resolveTargets, planFromSales, planFromRevenue, revenueScenarios, investmentNeeded, isRealDate, todayISO, daysInMonth,
   };
 });

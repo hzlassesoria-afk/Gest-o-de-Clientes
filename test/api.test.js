@@ -161,3 +161,15 @@ test('metas: pessoas só aceitam número inteiro (realizado e meta por número),
   assert.deepEqual(r.body.goals['2027-04'].days['2027-04-01'], { investimento: 123.45, vendas: 2, leads: 7 });
   await call(base, 'DELETE');
 });
+
+test('metas: guarda faturamento e valor médio por venda junto da meta', async () => {
+  const base = '/api/clients/petra-seguros/goals/2027-03';
+  const meta = { investimento: 5000, faturamento: 100000, ticketVenda: 1500, itens: { leads: { modo: 'custo', valor: 35 } } };
+  let r = await call(base, 'PUT', { meta });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.goals['2027-03'].meta.faturamento, 100000);
+  assert.equal(r.body.goals['2027-03'].meta.ticketVenda, 1500);
+  r = await call(base, 'PUT', { meta: { ...meta, faturamento: -1 } });
+  assert.equal(r.status, 400);
+  await call(base, 'DELETE');
+});

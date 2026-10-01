@@ -384,6 +384,16 @@ function needSlots(res, plan, html) {
     return;
   }
   const parts = [];
+  const comissao = {
+    min: Number((state.client.project || {}).comissaoMin) || Metrics.DEFAULT_COMMISSION.min,
+    max: Number((state.client.project || {}).comissaoMax) || Metrics.DEFAULT_COMMISSION.max,
+  };
+  const sc = Goals.revenueScenarios((plan && plan.meta) || {}, comissao);
+  if (sc) {
+    const line = (pct, r) => `comissão ${esc(fmt.dec(pct))}%: ${esc(fmt.int(r.vendas))} vendas, investir <b>${esc(fmt.brl(r.investimento))}</b>`;
+    parts.push(`Meta de faturamento ${esc(fmt.brl(plan.meta.faturamento))} (valor médio por venda ${esc(fmt.brl(plan.meta.ticketVenda))})`);
+    parts.push(line(comissao.max, sc.max), line(comissao.min, sc.min));
+  }
   parts.push(n.fromCpl
     ? `${esc(fmt.int(n.leads))} leads × ${esc(fmt.brl(n.cpl))} (teto por lead)`
     : 'Valor investido planejado na meta');
@@ -617,13 +627,17 @@ function openGoalDialog(month) {
   const prev = goalPlan(c, shiftMonth(month, -1));
   const cur = Goals.normalizeMeta((plan && plan.meta) || (prev && prev.meta) || {});
 
-  // Valores iniciais da calculadora: o que a meta atual já implica (taxas entre as etapas, custo por lead, vendas)
+  // Valores iniciais da calculadora: o que a meta atual já implica (taxas entre as etapas, custo por lead)
+  const comissao = {
+    min: Number((c.project || {}).comissaoMin) || Metrics.DEFAULT_COMMISSION.min,
+    max: Number((c.project || {}).comissaoMax) || Metrics.DEFAULT_COMMISSION.max,
+  };
   const calcInit = (() => {
     const { info } = Goals.resolveTargets(cur);
     const r1 = (v) => (v == null ? null : Math.round(v * 10) / 10);
     const taxas = {};
     for (const k of Goals.STAGES.slice(1)) taxas[k] = r1(info[k].taxa);
-    return { vendas: info.vendas.total, cpl: info.leads.custo == null ? null : Math.round(info.leads.custo * 100) / 100, taxas };
+    return { faturamento: cur.faturamento, ticket: cur.ticketVenda, cpl: info.leads.custo == null ? null : Math.round(info.leads.custo * 100) / 100, taxas };
   })();
 
   const stageRow = (k) => {
@@ -643,17 +657,19 @@ function openGoalDialog(month) {
     <div class="dlg-body">
       ${!plan && prev ? '<div class="notice good">Valores preenchidos com a meta do mês anterior. Ajuste o que precisar.</div>' : ''}
       <div class="form-grid"><label>Valor investido no mês (R$)<input type="number" min="0" step="any" inputmode="decimal" name="investimento" value="${esc(cur.investimento ?? '')}"></label></div>
-      <details class="calc" id="calc">
-        <summary>Calculadora: quanto preciso investir para bater a meta de vendas?</summary>
+      <details class="calc" id="calc" ${cur.faturamento ? 'open' : ''}>
+        <summary>Calculadora: quanto preciso investir para bater a meta de faturamento?</summary>
         <div class="calc-body">
           <div class="form-grid">
-            <label>Meta de vendas (un.)<input type="number" min="1" step="1" inputmode="numeric" name="calc-vendas" value="${esc(calcInit.vendas ?? '')}"></label>
+            <label>Meta de faturamento (R$)<input type="number" min="0" step="any" inputmode="decimal" name="calc-faturamento" value="${esc(calcInit.faturamento ?? '')}"></label>
+            <label>Valor médio por venda (R$)<input type="number" min="0" step="any" inputmode="decimal" name="calc-ticket" value="${esc(calcInit.ticket ?? '')}"></label>
             <label>Custo por lead (R$)<input type="number" min="0" step="any" inputmode="decimal" name="calc-cpl" value="${esc(calcInit.cpl ?? '')}"></label>
             <label>Leads → qualificados (%)<input type="number" min="0" max="100" step="any" inputmode="decimal" name="calc-leadsQualificados" value="${esc(calcInit.taxas.leadsQualificados ?? '')}"></label>
             <label>Qualificados → cotações (%)<input type="number" min="0" max="100" step="any" inputmode="decimal" name="calc-cotacoes" value="${esc(calcInit.taxas.cotacoes ?? '')}"></label>
             <label>Cotações → negociações (%)<input type="number" min="0" max="100" step="any" inputmode="decimal" name="calc-negociacoes" value="${esc(calcInit.taxas.negociacoes ?? '')}"></label>
             <label>Negociações → vendas (%)<input type="number" min="0" max="100" step="any" inputmode="decimal" name="calc-vendas-taxa" value="${esc(calcInit.taxas.vendas ?? '')}"></label>
           </div>
+          <p class="hint">Faturamento = volume vendido × comissão (${esc(fmt.dec(comissao.min))}% a ${esc(fmt.dec(comissao.max))}% do volume; ajuste em “Dados do projeto”). O valor médio por venda é o volume médio de cada venda.</p>
           <div class="calc-out" id="calc-out" aria-live="polite"></div>
           <button type="button" class="btn btn-ghost" id="calc-apply" disabled>Usar na meta</button>
         </div>
@@ -671,7 +687,8 @@ function openGoalDialog(month) {
 
   const form = $('#goal-form');
   const readMeta = () => {
-    const meta = { investimento: form.elements.investimento.value === '' ? null : Number(form.elements.investimento.value), itens: {} };
+    const numOrNull = (name) => (form.elements[name].value === '' ? null : Number(form.elements[name].value));
+    const meta = { investimento: numOrNull('investimento'), faturamento: numOrNull('calc-faturamento'), ticketVenda: numOrNull('calc-ticket'), itens: {} };
     for (const k of Goals.STAGES) {
       const raw = form.elements['val-' + k].value;
       meta.itens[k] = { modo: form.elements['modo-' + k].value, valor: raw === '' ? null : Number(raw) };
@@ -694,20 +711,24 @@ function openGoalDialog(month) {
       $(`[data-eq="${k}"]`).textContent = needBase ? 'Defina a etapa anterior para calcular.' : needInv ? 'Informe o valor investido para calcular.' : parts.join(' · ');
     }
   };
-  // Calculadora: do alvo de vendas para o investimento (usa o motor da meta, com pessoas sempre inteiras)
+  // Calculadora: da meta de faturamento ao investimento, nas duas pontas da comissão
   let calcResult = null;
   const calcOut = $('#calc-out'), calcApply = $('#calc-apply');
   const readCalc = () => ({
-    vendas: form.elements['calc-vendas'].value, cpl: form.elements['calc-cpl'].value,
+    faturamento: form.elements['calc-faturamento'].value, ticketVenda: form.elements['calc-ticket'].value, cpl: form.elements['calc-cpl'].value,
     taxas: Object.fromEntries(Goals.STAGES.slice(1).map((k) => [k, form.elements[k === 'vendas' ? 'calc-vendas-taxa' : 'calc-' + k].value])),
   });
   const calcPreview = () => {
-    calcResult = Goals.planFromSales(readCalc());
-    calcApply.disabled = !calcResult;
-    if (!calcResult) { calcOut.textContent = 'Preencha a meta de vendas, o custo por lead e as quatro taxas (maiores que 0 e até 100%).'; return; }
-    const t = calcResult.totais;
-    calcOut.innerHTML = `${esc(fmt.int(t.leads))} leads → ${esc(fmt.int(t.leadsQualificados))} qualificados → ${esc(fmt.int(t.cotacoes))} cotações → ${esc(fmt.int(t.negociacoes))} negociações → <b>${esc(fmt.int(t.vendas))} vendas</b><br>
-      Investimento necessário em anúncios: <b>${esc(fmt.brl(calcResult.investimento))}</b> (${esc(fmt.int(t.leads))} leads × ${esc(fmt.brl(Number(form.elements['calc-cpl'].value)))})`;
+    const v = readCalc();
+    const hi = Goals.planFromRevenue({ ...v, comissaoPct: comissao.max });
+    const lo = Goals.planFromRevenue({ ...v, comissaoPct: comissao.min });
+    calcResult = lo; // para a meta, o cenário conservador: comissão menor = mais volume = mais investimento
+    calcApply.disabled = !lo;
+    if (!lo || !hi) { calcOut.textContent = 'Preencha a meta de faturamento, o valor médio por venda, o custo por lead e as quatro taxas (maiores que 0 e até 100%).'; return; }
+    const line = (pct, r) => `<b>Comissão ${esc(fmt.dec(pct))}%</b>: volume de ${esc(fmt.brl(r.volume))} → ${esc(fmt.int(r.vendas))} vendas → ${esc(fmt.int(r.totais.negociacoes))} negociações → ${esc(fmt.int(r.totais.cotacoes))} cotações → ${esc(fmt.int(r.totais.leadsQualificados))} qualificados → ${esc(fmt.int(r.totais.leads))} leads<br>
+      Investir em anúncios: <b>${esc(fmt.brl(r.investimento))}</b>`;
+    calcOut.innerHTML = `${line(comissao.max, hi)}<br><br>${line(comissao.min, lo)}`;
+    calcApply.textContent = `Usar na meta (cenário com comissão de ${fmt.dec(comissao.min)}%)`;
   };
   calcApply.onclick = () => {
     if (!calcResult) return;

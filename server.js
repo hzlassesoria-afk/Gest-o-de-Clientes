@@ -104,7 +104,7 @@ const GOAL_MODES = {
 /** Meta do mês: formato novo { investimento, itens: { etapa: { modo, valor } } } ou o antigo, com chaves soltas. */
 function cleanGoalMeta(meta) {
   if (!meta || typeof meta !== 'object' || meta.itens === undefined) return cleanGoalNumbers(meta, GOAL_META_FIELDS);
-  const out = { ...cleanGoalNumbers(meta, ['investimento']), itens: {} };
+  const out = { ...cleanGoalNumbers(meta, ['investimento', 'faturamento', 'ticketVenda']), itens: {} };
   if (meta.itens === null || typeof meta.itens !== 'object') throw Object.assign(new Error('"itens" deve ser um objeto'), { status: 400 });
   for (const [k, it] of Object.entries(meta.itens)) {
     if (!GOAL_MODES[k]) continue;

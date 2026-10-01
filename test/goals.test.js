@@ -320,3 +320,28 @@ test('investmentNeeded: leads por custo → leads × teto; sem custo → o valor
   near(b.necessario, 5000);
   assert.equal(Goals.investmentNeeded({}), null);
 });
+
+test('planFromRevenue: faturamento → volume (÷ comissão) → vendas (÷ valor médio) → investimento', () => {
+  const taxas = { leadsQualificados: 25, cotacoes: 70, negociacoes: 60, vendas: 30 };
+  const r = Goals.planFromRevenue({ faturamento: 100000, ticketVenda: 1500, comissaoPct: 400, taxas, cpl: 35 });
+  near(r.volume, 25000);
+  assert.equal(r.vendas, 17);                 // 25.000 ÷ 1.500 = 16,67 → 17 vendas
+  assert.ok(r.totais.vendas >= 17 && Number.isInteger(r.totais.leads));
+  near(r.investimento, r.totais.leads * 35);
+  assert.equal(r.meta.faturamento, 100000);
+  // comissão menor exige mais volume e, por isso, mais investimento
+  const baixa = Goals.planFromRevenue({ faturamento: 100000, ticketVenda: 1500, comissaoPct: 250, taxas, cpl: 35 });
+  assert.ok(baixa.investimento > r.investimento);
+  assert.equal(Goals.planFromRevenue({ faturamento: 0, ticketVenda: 1500, comissaoPct: 250, taxas, cpl: 35 }), null);
+  assert.equal(Goals.planFromRevenue({ faturamento: 1000, ticketVenda: 0, comissaoPct: 250, taxas, cpl: 35 }), null);
+});
+
+test('revenueScenarios: lê a meta salva e devolve as duas pontas da comissão', () => {
+  const taxas = { leadsQualificados: 25, cotacoes: 70, negociacoes: 60, vendas: 30 };
+  const plan = Goals.planFromRevenue({ faturamento: 100000, ticketVenda: 1500, comissaoPct: 250, taxas, cpl: 35 });
+  const sc = Goals.revenueScenarios(plan.meta, { min: 250, max: 400 });
+  near(sc.min.investimento, plan.investimento);
+  assert.ok(sc.max.investimento < sc.min.investimento);
+  assert.equal(Goals.revenueScenarios({ investimento: 1000, itens: {} }, { min: 250, max: 400 }), null);
+  assert.equal(Goals.normalizeMeta(plan.meta).faturamento, 100000);
+});
