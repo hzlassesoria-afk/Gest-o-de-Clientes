@@ -69,6 +69,43 @@ function cleanMonth(input) {
   return out;
 }
 
+// ---------- metas da rotina comercial ----------
+const GOAL_META_FIELDS = ['investimento', 'cpl', 'cplQualificado', 'cotacoes', 'negociacoes', 'vendas'];
+const GOAL_DAY_FIELDS = ['investimento', 'leads', 'leadsQualificados', 'cotacoes', 'negociacoes', 'vendas'];
+
+function isRealDate(s) {
+  if (typeof s !== 'string' || !DATE_RE.test(s)) return false;
+  const d = new Date(s + 'T00:00:00Z');
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+}
+
+/** Números >= 0; vazio vira null. Só aceita os campos permitidos. */
+function cleanGoalNumbers(input, allowed) {
+  const out = {};
+  for (const [k, v] of Object.entries(input || {})) {
+    if (!allowed.includes(k)) continue;
+    if (v === '' || v == null) { out[k] = null; continue; }
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0) throw Object.assign(new Error(`Valor inválido em "${k}" (use um número maior ou igual a zero)`), { status: 400 });
+    out[k] = n;
+  }
+  return out;
+}
+
+function cleanGoalPlan(input, month) {
+  const out = {};
+  if ('meta' in input) out.meta = cleanGoalNumbers(input.meta, GOAL_META_FIELDS);
+  if ('compensarExcedente' in input) out.compensarExcedente = !!input.compensarExcedente;
+  if ('naoUteis' in input) {
+    if (!Array.isArray(input.naoUteis)) throw Object.assign(new Error('"naoUteis" deve ser uma lista de datas'), { status: 400 });
+    for (const d of input.naoUteis) {
+      if (!isRealDate(d) || !d.startsWith(month)) throw Object.assign(new Error(`Data de folga inválida: ${d}`), { status: 400 });
+    }
+    out.naoUteis = [...new Set(input.naoUteis)].sort();
+  }
+  return out;
+}
+
 function cleanProject(input) {
   const out = {};
   for (const k of ['startDate', 'contractDate', 'campaignStartDate', 'firstSaleDate']) {
@@ -158,6 +195,50 @@ async function handleApi(req, res, url) {
     }
   }
 
+  // /api/clients/:id/goals/:YYYY-MM            PUT cria/atualiza o plano do mês · DELETE apaga
+  // /api/clients/:id/goals/:YYYY-MM/days/:date  PUT lança o realizado do dia · DELETE limpa o dia
+  if (parts[2] === 'goals' && parts[3]) {
+    const month = parts[3];
+    if (!MONTH_RE.test(month)) return send(res, 400, { error: 'Mês inválido (use AAAA-MM)' });
+    client.goals = client.goals || {};
+
+    if (parts.length === 4) {
+      if (req.method === 'PUT') {
+        const clean = cleanGoalPlan(await readBody(req), month);
+        const prev = client.goals[month] || { meta: {}, days: {} };
+        client.goals[month] = { ...prev, ...clean, meta: { ...prev.meta, ...clean.meta }, days: prev.days || {} };
+        await saveDb(db);
+        return send(res, 200, client);
+      }
+      if (req.method === 'DELETE') {
+        delete client.goals[month];
+        await saveDb(db);
+        return send(res, 200, client);
+      }
+      return send(res, 405, { error: 'Método não permitido' });
+    }
+
+    if (parts.length === 6 && parts[4] === 'days') {
+      const date = parts[5];
+      if (!isRealDate(date) || !date.startsWith(month)) return send(res, 400, { error: 'Data inválida para este mês (use AAAA-MM-DD)' });
+      const plan = client.goals[month];
+      if (!plan) return send(res, 404, { error: 'Defina a meta do mês antes de lançar o realizado' });
+      plan.days = plan.days || {};
+      if (req.method === 'PUT') {
+        const merged = { ...plan.days[date], ...cleanGoalNumbers(await readBody(req), GOAL_DAY_FIELDS) };
+        if (Object.values(merged).every((v) => v == null)) delete plan.days[date]; else plan.days[date] = merged;
+        await saveDb(db);
+        return send(res, 200, client);
+      }
+      if (req.method === 'DELETE') {
+        delete plan.days[date];
+        await saveDb(db);
+        return send(res, 200, client);
+      }
+      return send(res, 405, { error: 'Método não permitido' });
+    }
+  }
+
   // /api/clients/:id/monday/sync  (?apply=1 aplica as sugestões ao projeto)
   // /api/clients/:id/demo  (POST carrega dados simulados, DELETE limpa só os simulados)
   if (parts[2] === 'demo' && parts.length === 3) {
@@ -229,4 +310,4 @@ if (require.main === module) {
   server.listen(PORT, () => console.log(`Gestão de Clientes rodando em http://localhost:${PORT}`));
 }
 
-module.exports = { server, handler, cleanMonth, cleanProject };
+module.exports = { server, handler, cleanMonth, cleanProject, cleanGoalPlan, cleanGoalNumbers };

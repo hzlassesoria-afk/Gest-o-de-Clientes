@@ -35,12 +35,12 @@ async function api(path, opts = {}) {
 }
 
 // ---------- estado ----------
-const state = { clients: [], client: null, period: null, view: 'periodo', chartMetric: 'roas' };
+const state = { clients: [], client: null, period: null, view: 'periodo', chartMetric: 'roas', goalMonth: null, saveChain: Promise.resolve() };
 
 // ---------- roteamento: #/<cliente>/<aba> ----------
 function parseRoute() {
   const [, id, tab] = location.hash.split('/');
-  return { id: id || null, tab: tab === 'monday' ? 'monday' : 'metricas' };
+  return { id: id || null, tab: tab === 'monday' || tab === 'metas' ? tab : 'metricas' };
 }
 
 async function render() {
@@ -67,11 +67,12 @@ async function render() {
     </div>
     <div class="tabs" role="tablist">
       <a href="#/${esc(c.id)}/metricas" ${route.tab === 'metricas' ? 'aria-current="page"' : ''}>Métricas do Projeto</a>
+      <a href="#/${esc(c.id)}/metas" ${route.tab === 'metas' ? 'aria-current="page"' : ''}>Metas (Rotina Comercial)</a>
       <a href="#/${esc(c.id)}/monday" ${route.tab === 'monday' ? 'aria-current="page"' : ''}>Entrada de Clientes (Monday)</a>
     </div>
     <div id="tab"></div>`;
 
-  if (route.tab === 'metricas') renderMetrics(); else renderMonday();
+  if (route.tab === 'metricas') renderMetrics(); else if (route.tab === 'metas') renderGoals(); else renderMonday();
 }
 
 // ---------- aba: Métricas ----------
@@ -352,6 +353,241 @@ function chartHtml(rows) {
     <text x="${padL - 6}" y="${padT + 4}" text-anchor="end">${esc(fmt.brl(max))}</text>
     <text x="${padL - 6}" y="${H - padB}" text-anchor="end">R$ 0</text>${bars}</svg>
     <div class="hint"><span style="color:var(--bar-2)">■</span> Investimento no Meta &nbsp; <span style="color:var(--bar)">■</span> Receita gerada em vendas</div></div>`;
+}
+
+// ---------- aba: Metas (rotina comercial: mensal → semanal → diário) ----------
+const shortDate = (d) => d.slice(8, 10) + '/' + d.slice(5, 7);
+const goalPlan = (c, month) => (c.goals && c.goals[month]) || null;
+const shiftMonth = (k, n) => { const d = new Date(Date.UTC(Number(k.slice(0, 4)), Number(k.slice(5, 7)) - 1 + n, 1)); return d.toISOString().slice(0, 7); };
+
+function goalMonthOptions(c) {
+  const keys = new Set(Object.keys(c.goals || {}));
+  const now = Goals.todayISO().slice(0, 7);
+  keys.add(now); keys.add(shiftMonth(now, 1));
+  if (state.goalMonth) keys.add(state.goalMonth);
+  return [...keys].sort().reverse();
+}
+
+const ROW_BY_KEY = Object.fromEntries(Goals.ROWS.map((r) => [r.key, r]));
+const fval = (row, v) => (v == null ? '—' : row.fmt === 'brl' ? fmt.brl(v) : fmt.dec(v));
+
+// Textos de cada "slot" (trechos que mudam quando o realizado muda) e o tom de cada célula de dia
+function goalSlots(res) {
+  const html = {}, tone = {};
+  const setCell = (prefix, row, cell) => {
+    html[`${prefix}:meta`] = cell.meta == null ? '<span class="na">—</span>'
+      : `<span title="${cell.raised ? `Meta-base ${esc(fval(row, cell.base))}; sobe para compensar o que ficou abaixo` : ''}">${row.kind === 'cost' ? 'Teto ' : ''}${cell.raised ? '<span class="up">▲</span> ' : ''}${esc(fval(row, cell.meta))}</span>`;
+    html[`${prefix}:real`] = cell.realizado == null ? '<span class="na">—</span>' : esc(fval(row, cell.realizado));
+    tone[prefix] = cell.tone;
+  };
+  for (const row of Goals.ROWS) {
+    const m = res.rows[row.key];
+    setCell(`m:${row.key}`, row, m);
+    html[`m:${row.key}:bar`] = row.kind === 'volume' && m.meta
+      ? `<div class="bar"><div class="t-${m.tone || 'none'}" style="width:${Math.min((m.pct || 0) * 100, 100)}%"></div></div>
+         <div class="note">${m.pct != null ? esc(fmt.pct(m.pct * 100)) + ' da meta' : 'Sem lançamento'}${m.falta ? ` · faltam ${esc(fval(row, m.falta))}` : m.pct != null ? ' · meta batida' : ''}</div>`
+      : row.kind === 'cost' ? `<div class="note">${m.tone === 'good' ? 'Dentro do teto' : m.tone === 'warn' ? 'Até 20% acima do teto' : m.tone === 'bad' ? 'Acima do teto' : 'Aguardando lançamentos'}</div>` : '';
+    for (const w of res.weeks) {
+      setCell(`w${w.n}:${row.key}`, row, w.rows[row.key]);
+      for (const d of w.days) if (d.working) setCell(`d:${d.date}:${row.key}`, row, d.rows[row.key]);
+    }
+  }
+  html.alert = res.semLancamento.length
+    ? `<div class="notice warn"><b>${res.semLancamento.length} dia(s) útil(eis) sem lançamento:</b> ${res.semLancamento.map(shortDate).join(', ')}.
+       Eles contam como zero e já empurram a meta dos próximos dias. Lance o realizado (pode ser 0) para a conta ficar certa.</div>` : '';
+  return { html, tone };
+}
+
+function applySlots(slots) {
+  document.querySelectorAll('[data-slot]').forEach((el) => {
+    const h = slots.html[el.dataset.slot];
+    if (h != null && el.innerHTML !== h) el.innerHTML = h;
+  });
+  document.querySelectorAll('[data-tone-of]').forEach((el) => {
+    const t = slots.tone[el.dataset.toneOf];
+    if (t) el.dataset.tone = t; else delete el.dataset.tone;
+  });
+}
+
+function renderGoals() {
+  const c = state.client;
+  if (!state.goalMonth) state.goalMonth = Goals.todayISO().slice(0, 7);
+  const month = state.goalMonth;
+  const plan = goalPlan(c, month);
+
+  const toolbar = `<div class="toolbar">
+      <label>Mês <select id="goal-month">${goalMonthOptions(c).map((k) => `<option value="${k}" ${k === month ? 'selected' : ''}>${esc(monthLabel(k))}${goalPlan(c, k) ? ' ✓' : ''}</option>`).join('')}</select></label>
+      <span class="spacer"></span>
+      <button class="btn" id="edit-goal">${plan ? 'Editar meta do mês' : 'Definir meta do mês'}</button>
+    </div>`;
+
+  if (!plan) {
+    $('#tab').innerHTML = `${toolbar}<div class="panel empty-state">
+      <p><b>Ainda não há meta para ${esc(monthLabel(month))}.</b></p>
+      <p>Defina a meta do mês e o sistema desdobra sozinho em semanas e dias úteis. Você só lança o realizado de cada dia;
+      quando a meta do dia (ou da semana) não é batida, a diferença é somada às metas seguintes automaticamente.</p></div>`;
+    $('#goal-month').onchange = (e) => { state.goalMonth = e.target.value; renderGoals(); };
+    $('#edit-goal').onclick = () => openGoalDialog(month);
+    return;
+  }
+
+  const res = Goals.compute(month, plan);
+  const slots = goalSlots(res);
+  const slot = (id) => `<span data-slot="${esc(id)}">${slots.html[id] ?? ''}</span>`;
+
+  const monthCards = Goals.ROWS.map((row) => `
+    <div class="card" data-tone-of="m:${row.key}">
+      <div class="label">${esc(row.label)}${row.support ? ' <span class="pill">apoio</span>' : ''}</div>
+      <div class="value">${slot(`m:${row.key}:real`)}</div>
+      <div class="note">Meta do mês: ${slot(`m:${row.key}:meta`)}</div>
+      ${slot(`m:${row.key}:bar`)}
+    </div>`).join('');
+
+  const weekHtml = res.weeks.map((w) => {
+    const head = w.days.map((d) => {
+      const cls = ['dayhead', d.isToday ? 'today' : '', d.working ? '' : 'off'].join(' ');
+      if (!d.inMonth) return `<th class="${cls}">${esc(d.label)}</th>`;
+      return `<th class="${cls}">
+        <div>${esc(d.label)} <span class="muted">${esc(shortDate(d.date))}</span></div>
+        ${d.working ? `<div class="theme">${esc(d.theme)}</div>` : `<div class="theme">${esc(d.holiday ? 'Feriado: ' + d.holiday : 'Folga')}</div>`}
+        <button type="button" class="linkbtn" data-toggle-off="${d.date}">${d.working ? 'marcar folga' : 'reativar dia'}</button></th>`;
+    }).join('');
+    const body = Goals.ROWS.map((row) => {
+      const cells = w.days.map((d) => {
+        if (!d.working) return '<td class="offcell">—</td>';
+        const real = row.input
+          ? `<input class="dayin" type="number" min="0" step="any" inputmode="decimal" aria-label="${esc(row.label)} realizado em ${esc(shortDate(d.date))}"
+              data-date="${d.date}" data-key="${row.key}" value="${esc(((plan.days || {})[d.date] || {})[row.key] ?? '')}">`
+          : `<div class="calc">${slot(`d:${d.date}:${row.key}:real`)}</div>`;
+        return `<td class="daycell" data-tone-of="d:${d.date}:${row.key}"><div class="dmeta">${slot(`d:${d.date}:${row.key}:meta`)}</div>${real}</td>`;
+      }).join('');
+      return `<tr class="${row.support ? 'support' : ''}"><th scope="row">${esc(row.label)}</th>
+        <td class="wk" data-tone-of="w${w.n}:${row.key}"><div class="dmeta">${slot(`w${w.n}:${row.key}:meta`)}</div><div class="calc">${slot(`w${w.n}:${row.key}:real`)}</div></td>${cells}</tr>`;
+    }).join('');
+    return `<h2 class="section">Semana ${String(w.n).padStart(2, '0')} · ${esc(shortDate(w.from))} a ${esc(shortDate(w.to))} <span class="muted">(${w.workingDays} dia${w.workingDays === 1 ? '' : 's'} útil${w.workingDays === 1 ? '' : 'eis'})</span></h2>
+      <div class="panel scroll"><table class="goal-table"><thead><tr><th>Métrica</th><th class="wk">Semana<div class="theme">meta / realizado</div></th>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  }).join('');
+
+  $('#tab').innerHTML = `${toolbar}
+    <div id="goal-alert"><span data-slot="alert">${slots.html.alert}</span></div>
+    ${res.hasTargets ? '' : '<div class="notice warn">A meta do mês está vazia. Use “Editar meta do mês” para preencher.</div>'}
+    <h2 class="section">Mensal · ${esc(monthLabel(month))} <span class="muted">(${res.workingDays} dias úteis)</span></h2>
+    <div class="grid">${monthCards}</div>
+    ${weekHtml}
+    <p class="hint">Digite só o <b>realizado</b> de cada dia; as metas se ajustam sozinhas. Em cada célula, a linha de cima é a meta e a de baixo é o realizado.
+    <span class="up">▲</span> = meta acima da base porque o período anterior ficou abaixo. Custo por lead é um teto (meta fixa), calculado como investimento ÷ leads.
+    Feriados nacionais já entram como folga; ajuste com “marcar folga” no cabeçalho do dia.</p>`;
+
+  $('#goal-month').onchange = (e) => { state.goalMonth = e.target.value; renderGoals(); };
+  $('#edit-goal').onclick = () => openGoalDialog(month);
+  applySlots(slots);
+
+  const tab = $('#tab');
+  tab.onchange = (e) => {
+    const el = e.target;
+    if (!el.matches || !el.matches('input.dayin')) return;
+    saveGoalDay(month, el.dataset.date, el.dataset.key, el.value);
+  };
+  // Tab/Enter descem a coluna do dia (e passam para o dia seguinte), em vez de andar pela linha
+  tab.onkeydown = (e) => {
+    const el = e.target;
+    if (!el.matches || !el.matches('input.dayin') || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (e.key !== 'Tab' && e.key !== 'Enter') return;
+    const table = el.closest('table');
+    const rowOf = (i) => i.closest('tr').rowIndex;
+    const inputs = [...table.querySelectorAll('input.dayin')]
+      .sort((a, b) => (a.dataset.date < b.dataset.date ? -1 : a.dataset.date > b.dataset.date ? 1 : rowOf(a) - rowOf(b)));
+    const next = inputs[inputs.indexOf(el) + (e.shiftKey && e.key === 'Tab' ? -1 : 1)];
+    if (!next) return; // fim da tabela: segue o comportamento normal
+    e.preventDefault();
+    next.focus(); next.select();
+  };
+  tab.onclick = async (e) => {
+    const btn = e.target.closest && e.target.closest('[data-toggle-off]');
+    if (!btn) return;
+    const date = btn.dataset.toggleOff;
+    const cur = new Set(Goals.compute(month, goalPlan(state.client, month)).offDays);
+    if (cur.has(date)) cur.delete(date); else cur.add(date);
+    await state.saveChain;
+    try {
+      state.client = await api(`/clients/${encodeURIComponent(c.id)}/goals/${month}`, { method: 'PUT', body: { naoUteis: [...cur] } });
+    } catch (err) { alert(err.message); }
+    renderGoals();
+  };
+}
+
+// Atualiza na tela na hora e grava em segundo plano (em fila, para não embaralhar gravações)
+function saveGoalDay(month, date, key, raw) {
+  const c = state.client;
+  const plan = goalPlan(c, month);
+  const value = raw === '' ? null : Number(raw);
+  if (value != null && (!Number.isFinite(value) || value < 0)) { alert('Informe um número maior ou igual a zero.'); renderGoals(); return; }
+  plan.days = plan.days || {};
+  plan.days[date] = { ...plan.days[date], [key]: value };
+  if (Object.values(plan.days[date]).every((v) => v == null)) delete plan.days[date];
+  applySlots(goalSlots(Goals.compute(month, plan)));
+  document.getElementById('goal-alert').innerHTML = `<span data-slot="alert">${goalSlots(Goals.compute(month, plan)).html.alert}</span>`;
+  state.saveChain = state.saveChain
+    .then(() => api(`/clients/${encodeURIComponent(c.id)}/goals/${month}/days/${date}`, { method: 'PUT', body: { [key]: raw } }))
+    .catch(async (err) => { alert('Não foi possível salvar: ' + err.message); state.client = await api(`/clients/${encodeURIComponent(c.id)}`); renderGoals(); });
+}
+
+function openGoalDialog(month) {
+  const c = state.client;
+  const plan = goalPlan(c, month);
+  const prev = goalPlan(c, shiftMonth(month, -1));
+  const meta = (plan && plan.meta) || (prev && prev.meta) || {};
+  const f = (k, label, step = 'any') => `<label>${esc(label)}<input type="number" min="0" step="${step}" name="${k}" value="${esc(meta[k] ?? '')}"></label>`;
+
+  openDialog(`<form method="dialog" id="goal-form">
+    <div class="dlg-head"><h3>Meta de ${esc(monthLabel(month))}</h3></div>
+    <div class="dlg-body">
+      ${!plan && prev ? '<div class="notice good">Valores preenchidos com a meta do mês anterior. Ajuste o que precisar.</div>' : ''}
+      <div class="form-grid">
+        ${f('investimento', 'Valor investido no mês (R$)')}
+        ${f('cpl', 'Custo por lead — teto (R$)')}
+        ${f('cplQualificado', 'Custo por lead qualificado — teto (R$)')}
+        ${f('cotacoes', 'Cotações no mês')}
+        ${f('negociacoes', 'Negociações no mês')}
+        ${f('vendas', 'Vendas no mês')}
+        <label class="full" style="flex-direction:row;align-items:center;gap:8px">
+          <input type="checkbox" name="compensarExcedente" ${plan && plan.compensarExcedente ? 'checked' : ''}>
+          Quando eu superar a meta, reduzir as metas seguintes (por padrão elas só sobem quando fico abaixo)</label>
+      </div>
+      <div class="hint" id="goal-derived"></div>
+      <p class="hint">Leads e leads qualificados necessários saem de investimento ÷ custo por lead. A meta é dividida pelos dias úteis de cada semana
+      (feriados nacionais já descontados) e se ajusta a cada lançamento de realizado.</p>
+      <div id="form-error" class="notice bad" hidden></div></div>
+    <div class="dlg-foot">
+      ${plan ? '<button type="button" class="btn btn-danger" id="del-goal">Apagar plano do mês</button>' : ''}<span style="flex:1"></span>
+      <button type="button" class="btn btn-ghost" id="cancel">Cancelar</button>
+      <button type="submit" class="btn">Salvar</button></div></form>`);
+
+  const derived = () => {
+    const v = (k) => Number($('#goal-form').elements[k].value) || 0;
+    const inv = v('investimento'), cpl = v('cpl'), cplq = v('cplQualificado');
+    $('#goal-derived').textContent = inv && (cpl || cplq)
+      ? `Isso pede ${cpl ? fmt.dec(inv / cpl) + ' leads' : '—'} e ${cplq ? fmt.dec(inv / cplq) + ' leads qualificados' : '—'} no mês.` : '';
+  };
+  $('#goal-form').oninput = derived;
+  derived();
+  $('#cancel').onclick = closeDialog;
+  const del = $('#del-goal');
+  if (del) del.onclick = async () => {
+    if (!confirm(`Apagar a meta de ${monthLabel(month)} E todo o realizado lançado nos dias? Não dá para desfazer.`)) return;
+    state.client = await api(`/clients/${encodeURIComponent(c.id)}/goals/${month}`, { method: 'DELETE' });
+    closeDialog(); renderGoals();
+  };
+  $('#goal-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const body = { meta: {}, compensarExcedente: fd.has('compensarExcedente') };
+    for (const k of Goals.META_FIELDS) body.meta[k] = fd.get(k);
+    try {
+      state.client = await api(`/clients/${encodeURIComponent(c.id)}/goals/${month}`, { method: 'PUT', body });
+      closeDialog(); renderGoals();
+    } catch (err) { const box = $('#form-error'); box.hidden = false; box.textContent = err.message; }
+  };
 }
 
 // ---------- aba: Monday ----------

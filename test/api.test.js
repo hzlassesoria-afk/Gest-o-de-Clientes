@@ -90,3 +90,39 @@ test('dados simulados: carrega, não sobrescreve dado real, e limpa só o simula
   assert.equal(r.body.client.project.contractDate, '2026-02-10');
   assert.equal(r.body.client.project.roasTarget, null); // era do demo e continuava igual
 });
+
+test('metas: cria plano do mês, lança realizado do dia e valida entradas', async () => {
+  const base = '/api/clients/petra-seguros/goals/2027-02';
+  // sem plano, não dá para lançar realizado
+  let r = await call(`${base}/days/2027-02-01`, 'PUT', { vendas: 1 });
+  assert.equal(r.status, 404);
+
+  r = await call(base, 'PUT', { meta: { investimento: '4000', cpl: 20, vendas: 10, hack: 1 }, naoUteis: ['2027-02-03'] });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body.goals['2027-02'].meta, { investimento: 4000, cpl: 20, vendas: 10 });
+  assert.deepEqual(r.body.goals['2027-02'].naoUteis, ['2027-02-03']);
+
+  // atualizar a meta preserva o que já estava e o realizado
+  r = await call(`${base}/days/2027-02-01`, 'PUT', { vendas: '2', leads: 15, lixo: 9 });
+  assert.deepEqual(r.body.goals['2027-02'].days['2027-02-01'], { vendas: 2, leads: 15 });
+  r = await call(base, 'PUT', { meta: { cotacoes: 40 }, compensarExcedente: true });
+  assert.equal(r.body.goals['2027-02'].meta.vendas, 10);
+  assert.equal(r.body.goals['2027-02'].meta.cotacoes, 40);
+  assert.equal(r.body.goals['2027-02'].compensarExcedente, true);
+  assert.equal(r.body.goals['2027-02'].days['2027-02-01'].vendas, 2);
+
+  // validações
+  assert.equal((await call(`${base}/days/2027-03-01`, 'PUT', { vendas: 1 })).status, 400); // fora do mês
+  assert.equal((await call(`${base}/days/2027-02-30`, 'PUT', { vendas: 1 })).status, 400); // data inexistente
+  assert.equal((await call(`${base}/days/2027-02-02`, 'PUT', { vendas: -1 })).status, 400);
+  assert.equal((await call(`${base}/days/2027-02-02`, 'PUT', { vendas: 'x' })).status, 400);
+  assert.equal((await call(base, 'PUT', { naoUteis: ['2027-03-03'] })).status, 400);
+  assert.equal((await call('/api/clients/petra-seguros/goals/fev', 'PUT', {})).status, 400);
+
+  // limpar todos os campos do dia remove o dia
+  r = await call(`${base}/days/2027-02-01`, 'PUT', { vendas: '', leads: '' });
+  assert.equal(r.body.goals['2027-02'].days['2027-02-01'], undefined);
+
+  r = await call(base, 'DELETE');
+  assert.equal(r.body.goals['2027-02'], undefined);
+});

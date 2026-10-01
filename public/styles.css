@@ -21,7 +21,7 @@ body { margin: 0; font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, 
 #client-list a { padding: 9px 10px; border-radius: 8px; color: var(--text); text-decoration: none; }
 #client-list a:hover { background: var(--bg); }
 #client-list a[aria-current="page"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
-.main { padding: 28px 32px 60px; max-width: 1200px; width: 100%; }
+.main { padding: 28px 32px 60px; max-width: 1200px; width: 100%; min-width: 0; }
 
 .page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
 .page-head h1 { margin: 0; font-size: 26px; }
@@ -120,3 +120,34 @@ table.mm tr.grp td { background: var(--bg); color: var(--muted); font-size: 12px
 table.mm .delta { margin-top: 1px; font-size: 11px; }
 table.mm .na { color: var(--muted); }
 .chart text.val { fill: var(--text); font-size: 12px; font-weight: 600; }
+
+/* Metas da rotina comercial */
+.muted { color: var(--muted); font-weight: 400; }
+.up { color: var(--warn); font-weight: 700; }
+.na { color: var(--muted); }
+.card .bar { height: 6px; background: var(--bg); border-radius: 4px; overflow: hidden; margin-top: 8px; }
+.card .bar > div { height: 100%; background: var(--bar); border-radius: 4px; }
+.card .bar > div.t-good { background: var(--good); }
+.card .bar > div.t-warn { background: var(--warn); }
+.card .bar > div.t-bad { background: var(--bad); }
+.card[data-tone="good"] { border-color: var(--good); }
+.card[data-tone="warn"] { border-color: var(--warn); }
+.card[data-tone="bad"] { border-color: var(--bad); }
+table.goal-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 13px; table-layout: fixed; min-width: 860px; }
+table.goal-table th, table.goal-table td { border: 1px solid var(--border); padding: 6px 8px; vertical-align: top; text-align: center; }
+table.goal-table thead th { background: var(--bg); font-weight: 600; font-size: 12px; }
+table.goal-table thead th:first-child, table.goal-table tbody th { width: 170px; text-align: left; }
+table.goal-table tbody th { font-weight: 600; background: var(--bg); }
+table.goal-table tr.support th, table.goal-table tr.support td { opacity: .85; }
+table.goal-table .wk { width: 120px; background: var(--bg); }
+table.goal-table .theme { font-weight: 400; color: var(--muted); font-size: 11px; }
+table.goal-table .dayhead.today { box-shadow: inset 0 -3px 0 var(--accent); }
+table.goal-table .dayhead.off, table.goal-table .offcell { color: var(--muted); background: var(--bg); }
+table.goal-table .dmeta { color: var(--muted); font-size: 12px; margin-bottom: 4px; min-height: 16px; }
+table.goal-table .calc { font-weight: 700; min-height: 30px; line-height: 30px; }
+table.goal-table input.dayin { width: 100%; padding: 4px 6px; text-align: center; font-variant-numeric: tabular-nums; }
+table.goal-table td[data-tone="good"] { background: var(--good-bg); }
+table.goal-table td[data-tone="warn"] { background: var(--warn-bg); }
+table.goal-table td[data-tone="bad"] { background: var(--bad-bg); }
+table.goal-table td[data-tone] input { background: transparent; }
+.linkbtn { font: inherit; font-size: 11px; font-weight: 400; background: none; border: 0; padding: 2px 0 0; color: var(--accent); cursor: pointer; text-decoration: underline; }
