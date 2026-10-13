@@ -14,6 +14,10 @@ from openpyxl.comments import Comment
 
 OUT = sys.argv[1]
 TEST = '--teste' in sys.argv
+VAZIO = '--vazio' in sys.argv      # modelo limpo: sem os números de exemplo
+CLIENTE = '[Nome do cliente]'
+if '--cliente' in sys.argv:
+    CLIENTE = sys.argv[sys.argv.index('--cliente') + 1]
 
 FONT = 'Arial'
 f_norm = Font(name=FONT, size=10)
@@ -84,14 +88,17 @@ def put(ws, ref, value, font=f_norm, fmt=None, fill=None, align=None, border=box
 
 # ============================================================ Base de Dados
 ws = base
-ws['A1'] = 'Base de dados — previsões do mês'; ws['A1'].font = f_title
+ws['A1'] = '="Base de dados — previsões do mês · "&$B$3'; ws['A1'].font = f_title
 ws['A2'] = 'Preencha só as células amarelas (letras azuis). Todas as outras abas se calculam sozinhas a partir daqui.'
 ws['A2'].font = f_sub
 
+put(ws, 'A3', 'Cliente / profissional', f_bold)
+put(ws, 'B3', CLIENTE, f_input, None, fill_input)
+ws.merge_cells('B3:D3')
 put(ws, 'A4', 'Mês de referência (1º dia do mês)', f_bold)
 put(ws, 'B4', date(2026, 10, 1), f_input, 'mm/yyyy', fill_input)
 put(ws, 'A5', 'Investimento previsto (R$)', f_bold)
-put(ws, 'B5', 30000, f_input, MONEY, fill_input)
+put(ws, 'B5', None if VAZIO else 30000, f_input, MONEY, fill_input)
 put(ws, 'A6', 'Data de hoje (para saber o que já passou)', f_bold)
 put(ws, 'B6', date(2026, 10, 14) if TEST else '=TODAY()', f_input if TEST else f_norm, DATEF, fill_input if TEST else None)
 put(ws, 'A7', 'Reduzir as metas seguintes quando eu superar a meta?', f_bold)
@@ -110,7 +117,7 @@ for i, (name, modo, val) in enumerate(stages):
     r = 10 + i
     put(ws, f'A{r}', name, f_bold)
     put(ws, f'B{r}', modo, f_input, None, fill_input, center)
-    put(ws, f'C{r}', val, f_input, '#,##0.00', fill_input)
+    put(ws, f'C{r}', None if VAZIO else val, f_input, '#,##0.00', fill_input)
     put(ws, f'D{r}', f'=IF(B{r}="Custo","R$ por "&LOWER(A{r}),IF(B{r}="Porcentagem","% da etapa anterior",IF(B{r}="Número","unidades no mês","")))', f_norm)
     if i == 0:
         e = (f'=IFERROR(IF(C{r}="","",IF(B{r}="Custo",ROUNDUP(ROUND($B$5/C{r},6),0),'
@@ -132,7 +139,8 @@ for i, (name, modo, val) in enumerate(stages):
               f'=IF(C{r}="","Preencha o valor",IF(AND(B{r}="Custo",$B$5<=0),"Informe o investimento previsto",IF(E{r}="","Confira o valor","")))')
     put(ws, f'H{r}', alerta, Font(name=FONT, size=10, color='C00000'))
 
-ws['A15'] = 'Linha de exemplo: Investimento R$ 30.000, Lead a R$ 35,00 (858 leads), cotação em 20% dos leads, negociação em 60% das cotações, venda em 30% das negociações. Troque pelos seus números.'
+EXEMPLO = 'investimento R$ 30.000, lead a R$ 35,00 (858 leads), cotação em 20% dos leads, negociação em 60% das cotações, venda em 30% das negociações.'
+ws['A15'] = ('Exemplo de preenchimento: ' + EXEMPLO) if VAZIO else ('Os números atuais são um exemplo: ' + EXEMPLO + ' Troque pelos seus.')
 ws['A15'].font = f_sub
 leg = [
     ('Como usar', None),
@@ -308,7 +316,7 @@ ws.sheet_properties.tabColor = '999999'
 
 # ============================================================ Meta Diária
 ws = diario
-ws['A1'] = 'Meta diária (dias úteis)'; ws['A1'].font = f_title
+ws['A1'] = '="Meta diária (dias úteis) · "&\'Base de Dados\'!$B$3'; ws['A1'].font = f_title
 ws['A2'] = 'Digite só o REALIZADO de cada dia (células amarelas). A meta de cada dia se ajusta sozinha: ficou abaixo, a meta seguinte sobe.'
 ws['A2'].font = f_sub
 ws['A3'] = 'Verde = bateu a meta do dia · Amarelo = entre 70% e 100% · Vermelho = abaixo de 70% · Custos: verde = dentro do teto, amarelo = até 20% acima, vermelho = acima.'
@@ -391,7 +399,7 @@ ws.sheet_view.showGridLines = False
 
 # ============================================================ Meta Semanal
 ws = semanal
-ws['A1'] = 'Meta semanal'; ws['A1'].font = f_title
+ws['A1'] = '="Meta semanal · "&\'Base de Dados\'!$B$3'; ws['A1'].font = f_title
 ws['A2'] = 'Semanas de segunda a sexta. A meta de cada semana sobe quando a semana anterior ficou abaixo. O realizado vem da aba Meta Diária.'
 ws['A2'].font = f_sub
 labels = ['Semana', 'Período', 'Dias úteis']
@@ -458,7 +466,7 @@ ws.sheet_view.showGridLines = False
 
 # ============================================================ Meta Mensal
 ws = mensal
-ws['A1'] = 'Meta mensal'; ws['A1'].font = f_title
+ws['A1'] = '="Meta mensal · "&\'Base de Dados\'!$B$3'; ws['A1'].font = f_title
 put(ws, 'A3', 'Mês', f_bold); put(ws, 'B3', f'={B}$B$4', f_link, 'mm/yyyy')
 put(ws, 'C3', 'Dias úteis', f_bold); put(ws, 'D3', f'={C}B2', f_link, '0')
 put(ws, 'E3', 'Dias encerrados', f_bold); put(ws, 'F3', f'={C}B3', f_link, '0')
@@ -519,5 +527,6 @@ for w_ in (base, mensal, semanal, diario):
     w_.page_setup.fitToWidth = 1
     w_.page_setup.fitToHeight = 0
 wb.active = 0
+wb.properties.title = f'Painel de metas comerciais — {CLIENTE}'
 wb.save(OUT)
 print('ok', OUT)
