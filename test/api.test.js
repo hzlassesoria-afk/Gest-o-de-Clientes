@@ -173,3 +173,19 @@ test('metas: guarda faturamento e valor médio por venda junto da meta', async (
   assert.equal(r.status, 400);
   await call(base, 'DELETE');
 });
+
+test('metas: ligações por lead e realizado de ligações são aceitos; ligações por lead precisa ser inteiro', async () => {
+  const base = '/api/clients/petra-seguros/goals/2027-04';
+  const meta = { investimento: 3500, ligacoesPorLead: 2, itens: { leads: { modo: 'custo', valor: 35 } } };
+  let r = await call(base, 'PUT', { meta });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.goals['2027-04'].meta.ligacoesPorLead, 2);
+  r = await call(base + '/days/2027-04-01', 'PUT', { ligacoes: 12 });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.goals['2027-04'].days['2027-04-01'].ligacoes, 12);
+  r = await call(base + '/days/2027-04-02', 'PUT', { ligacoes: 1.5 });
+  assert.equal(r.status, 400);
+  r = await call(base, 'PUT', { meta: { ...meta, ligacoesPorLead: 1.5 } });
+  assert.equal(r.status, 400);
+  await call(base, 'DELETE');
+});

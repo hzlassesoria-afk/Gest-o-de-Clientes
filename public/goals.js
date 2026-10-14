@@ -43,19 +43,21 @@
   const LEGACY_KEY = { leads: 'cpl', leadsQualificados: 'cplQualificado', cotacoes: 'cotacoes', negociacoes: 'negociacoes', vendas: 'vendas' };
   const META_FIELDS = ['investimento', 'cpl', 'cplQualificado', 'cotacoes', 'negociacoes', 'vendas'];
   // Realizado que o usuário lança por dia (valores brutos)
-  const DAY_FIELDS = ['investimento', 'leads', 'leadsQualificados', 'cotacoes', 'negociacoes', 'vendas'];
+  const DAY_FIELDS = ['investimento', 'leads', 'ligacoes', 'leadsQualificados', 'cotacoes', 'negociacoes', 'vendas'];
   // Métricas de volume: somam entre dias e semanas e têm compensação
-  const VOLUME = ['investimento', 'leads', 'leadsQualificados', 'cotacoes', 'negociacoes', 'vendas'];
+  const VOLUME = ['investimento', 'leads', 'ligacoes', 'leadsQualificados', 'cotacoes', 'negociacoes', 'vendas'];
   // Linhas exibidas, na ordem do funil
   const ROWS = [
     { key: 'investimento', label: 'Valor investido', fmt: 'brl', kind: 'volume', input: true },
     { key: 'leads', label: 'Leads', fmt: 'int', kind: 'volume', input: true, support: true, integer: true },
     { key: 'cpl', label: 'Custo por lead', fmt: 'brl', kind: 'cost', numerator: 'investimento', denominator: 'leads', stage: 'leads' },
+    // Meta de ESFORÇOS: o que a equipe controla (ligar, cotar, agendar), em vez do resultado final. group: 'esforco' | 'resultado'
+    { key: 'ligacoes', label: 'Ligações para leads', fmt: 'int', kind: 'volume', input: true, integer: true, group: 'esforco' },
     { key: 'leadsQualificados', label: 'Leads qualificados', fmt: 'int', kind: 'volume', input: true, support: true, integer: true },
     { key: 'cplQualificado', label: 'Custo por lead qualificado', fmt: 'brl', kind: 'cost', numerator: 'investimento', denominator: 'leadsQualificados', stage: 'leadsQualificados' },
-    { key: 'cotacoes', label: 'Cotação', fmt: 'int', kind: 'volume', input: true, integer: true },
+    { key: 'cotacoes', label: 'Cotação', fmt: 'int', kind: 'volume', input: true, integer: true, group: 'esforco' },
     { key: 'custoCotacao', label: 'Custo por cotação', fmt: 'brl', kind: 'cost', numerator: 'investimento', denominator: 'cotacoes', stage: 'cotacoes', optional: true },
-    { key: 'negociacoes', label: 'Negociação', fmt: 'int', kind: 'volume', input: true, integer: true },
+    { key: 'negociacoes', label: 'Negociação', fmt: 'int', kind: 'volume', input: true, integer: true, group: 'esforco' },
     { key: 'custoNegociacao', label: 'Custo por negociação', fmt: 'brl', kind: 'cost', numerator: 'investimento', denominator: 'negociacoes', stage: 'negociacoes', optional: true },
     { key: 'vendas', label: 'Vendas', fmt: 'int', kind: 'volume', input: true, integer: true },
     { key: 'custoVenda', label: 'Custo por venda', fmt: 'brl', kind: 'cost', numerator: 'investimento', denominator: 'vendas', stage: 'vendas', optional: true },
@@ -154,7 +156,7 @@
       if (it && MODES[k].includes(it.modo)) itens[k] = { modo: it.modo, valor: num(it.valor) };
       else itens[k] = { modo: DEFAULT_MODE[k], valor: num(m[LEGACY_KEY[k]]) };
     }
-    return { investimento: num(m.investimento), faturamento: num(m.faturamento), ticketVenda: num(m.ticketVenda), itens };
+    return { ligacoesPorLead: num(m.ligacoesPorLead), investimento: num(m.investimento), faturamento: num(m.faturamento), ticketVenda: num(m.ticketVenda), itens };
   }
 
   /**
@@ -190,6 +192,9 @@
       };
       if (total != null) base = total;
     }
+    // Esforço: ligações = leads da meta × ligações por lead (1 por padrão; 2 = duas tentativas por lead)
+    const porLead = n.ligacoesPorLead != null && n.ligacoesPorLead > 0 ? n.ligacoesPorLead : 1;
+    targets.ligacoes = targets.leads != null ? ceilInt(targets.leads * porLead) : null;
     return { targets, info };
   }
 

@@ -71,7 +71,7 @@ function cleanMonth(input) {
 
 // ---------- metas da rotina comercial ----------
 const GOAL_META_FIELDS = ['investimento', 'cpl', 'cplQualificado', 'cotacoes', 'negociacoes', 'vendas'];
-const GOAL_DAY_FIELDS = ['investimento', 'leads', 'leadsQualificados', 'cotacoes', 'negociacoes', 'vendas'];
+const GOAL_DAY_FIELDS = ['investimento', 'leads', 'ligacoes', 'leadsQualificados', 'cotacoes', 'negociacoes', 'vendas'];
 
 function isRealDate(s) {
   if (typeof s !== 'string' || !DATE_RE.test(s)) return false;
@@ -104,7 +104,10 @@ const GOAL_MODES = {
 /** Meta do mês: formato novo { investimento, itens: { etapa: { modo, valor } } } ou o antigo, com chaves soltas. */
 function cleanGoalMeta(meta) {
   if (!meta || typeof meta !== 'object' || meta.itens === undefined) return cleanGoalNumbers(meta, GOAL_META_FIELDS);
-  const out = { ...cleanGoalNumbers(meta, ['investimento', 'faturamento', 'ticketVenda']), itens: {} };
+  const out = { ...cleanGoalNumbers(meta, ['investimento', 'faturamento', 'ticketVenda', 'ligacoesPorLead']), itens: {} };
+  if (out.ligacoesPorLead != null && (!Number.isInteger(out.ligacoesPorLead) || out.ligacoesPorLead < 1)) {
+    throw Object.assign(new Error('"ligacoesPorLead" deve ser um número inteiro a partir de 1'), { status: 400 });
+  }
   if (meta.itens === null || typeof meta.itens !== 'object') throw Object.assign(new Error('"itens" deve ser um objeto'), { status: 400 });
   for (const [k, it] of Object.entries(meta.itens)) {
     if (!GOAL_MODES[k]) continue;

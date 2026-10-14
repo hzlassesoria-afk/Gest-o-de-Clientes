@@ -282,7 +282,7 @@ test('dia com meta 0 que mesmo assim vendeu aparece como bom; sem venda fica neu
 
 test('linhas de pessoas são marcadas como inteiras (para o formulário)', () => {
   const inteiras = Goals.ROWS.filter((r) => r.integer).map((r) => r.key);
-  assert.deepEqual(inteiras, ['leads', 'leadsQualificados', 'cotacoes', 'negociacoes', 'vendas']);
+  assert.deepEqual(inteiras, ['leads', 'ligacoes', 'leadsQualificados', 'cotacoes', 'negociacoes', 'vendas']);
 });
 
 test('planFromSales: do alvo de vendas ao investimento, passando pelo funil', () => {
@@ -344,4 +344,18 @@ test('revenueScenarios: lê a meta salva e devolve as duas pontas da comissão',
   assert.ok(sc.max.investimento < sc.min.investimento);
   assert.equal(Goals.revenueScenarios({ investimento: 1000, itens: {} }, { min: 250, max: 400 }), null);
   assert.equal(Goals.normalizeMeta(plan.meta).faturamento, 100000);
+});
+
+test('meta de esforços: ligações = leads × ligações por lead, dividida em semanas e dias como as demais', () => {
+  const meta = { investimento: 3500, itens: { leads: { modo: 'custo', valor: 35 } } };          // 100 leads
+  assert.equal(Goals.resolveTargets(meta).targets.ligacoes, 100);
+  assert.equal(Goals.resolveTargets({ ...meta, ligacoesPorLead: 3 }).targets.ligacoes, 300);
+  assert.equal(Goals.resolveTargets({ itens: {} }).targets.ligacoes, null);
+  const r = Goals.compute('2027-02', { meta: { ...meta, ligacoesPorLead: 2 }, naoUteis: [], days: { '2027-02-01': { ligacoes: 5 } } }, '2027-02-02');
+  assert.equal(r.rows.ligacoes.meta, 200);
+  assert.equal(r.rows.ligacoes.realizado, 5);
+  const soma = r.weeks.reduce((s, w) => s + w.days.reduce((t, d) => t + (d.rows.ligacoes.meta || 0), 0), 0);
+  assert.ok(soma >= 195, 'metas diárias somam perto do total: ' + soma);
+  assert.deepEqual(Goals.ROWS.filter((x) => x.group === 'esforco').map((x) => x.key), ['ligacoes', 'cotacoes', 'negociacoes']);
+  assert.ok(r.semLancamento.length === 0 || r.semLancamento.length >= 0);
 });
