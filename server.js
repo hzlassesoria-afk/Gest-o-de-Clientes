@@ -5,6 +5,7 @@ const path = require('path');
 const monday = require('./lib/monday');
 const { createStore } = require('./lib/store');
 const { applyDemo, clearDemo } = require('./lib/demo');
+const { handleCrm } = require('./lib/crm/routes');
 
 const PORT = Number(process.env.PORT) || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
@@ -45,6 +46,17 @@ function readBody(req) {
     req.on('error', reject);
   });
 }
+
+function readRaw(req) {
+  return new Promise((resolve, reject) => {
+    let size = 0; const chunks = [];
+    req.on('data', (c) => { size += c.length; if (size > 1e6) { reject(Object.assign(new Error('Corpo muito grande'), { status: 413 })); req.destroy(); return; } chunks.push(c); });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+const crmCtx = { send, readBody, readRaw, dataDir: DATA_DIR };
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -172,6 +184,7 @@ async function handleApi(req, res, url) {
   const parts = route != null
     ? route.split('/').filter(Boolean)
     : url.pathname.split('/').filter(Boolean).slice(1); // remove "api"
+  if (['crm', 'webhooks', 'cron'].includes(parts[0])) return handleCrm(req, res, url, parts, crmCtx);
   const db = await loadDb();
 
   if (parts[0] !== 'clients') return send(res, 404, { error: 'Rota não encontrada' });
@@ -351,4 +364,4 @@ if (require.main === module) {
   server.listen(PORT, () => console.log(`Gestão de Clientes rodando em http://localhost:${PORT}`));
 }
 
-module.exports = { server, handler, cleanMonth, cleanProject, cleanGoalPlan, cleanGoalNumbers, cleanGoalMeta, cleanGoalDay };
+module.exports = { server, handler, crmCtx, cleanMonth, cleanProject, cleanGoalPlan, cleanGoalNumbers, cleanGoalMeta, cleanGoalDay };

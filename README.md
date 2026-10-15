@@ -51,3 +51,17 @@ MONDAY_API_TOKEN=... npm start
 
 ## Dados
 Ficam em `data/clients.json` (criado a partir de `seed/clients.json` na primeira execução e ignorado pelo git). Use `DATA_DIR` para mudar o local e `PORT` para a porta.
+
+## CRM com follow-up automático (base)
+
+Leads (formulário do Meta ou WhatsApp) entram no CRM e recebem follow-up automático seguindo a cadência do playbook.
+Código em `lib/crm/`; rotas em `/api/crm/*`, `/api/webhooks/meta` e `/api/cron/followups`; testes em `test/crm.test.js`.
+
+Regras de segurança do envio: nunca contata quem pediu para parar; só envia seg a sáb, 8h às 20h (Brasília); a cadência de cada etapa
+para quando o lead responde; fora da janela de 24h do WhatsApp só sai modelo aprovado no Meta; mensagem com dado faltando não sai.
+Por padrão o modo é `approval`: cada envio entra numa fila e a equipe aprova. Em `auto` o envio é direto.
+
+Variáveis de ambiente: `CRM_API_KEY` (obrigatória em produção, os dados são pessoais), `META_APP_SECRET`, `META_VERIFY_TOKEN`,
+`META_ACCESS_TOKEN` (ler leads), `WHATSAPP_TOKEN` e `WHATSAPP_PHONE_ID` (envio real; sem elas o envio é simulado), `CRON_SECRET`.
+A rodada de follow-up precisa de um agendador chamando `GET /api/cron/followups` com `Authorization: Bearer $CRON_SECRET`
+a cada 15 minutos (Vercel Cron em plano que permita, ou um agendador externo).
